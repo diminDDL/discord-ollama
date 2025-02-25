@@ -5,6 +5,7 @@ WORKDIR /app/
 
 COPY ./requirements.txt /tmp/requirements.txt
 COPY ./ollamads /app/ollamads
+COPY ./.git /app/.git
 
 WORKDIR /tmp/
 

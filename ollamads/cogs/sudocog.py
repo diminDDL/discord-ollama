@@ -15,6 +15,7 @@ class SudoCommandsEnum(IntEnum):
     reload = 2
     restart = 3
     shutdown = 4
+    update = 5
 
 
 class SudoCommands(commands.Cog):
@@ -40,8 +41,10 @@ class SudoCommands(commands.Cog):
                 await self.__restart__(ctx)
             case SudoCommandsEnum.shutdown:
                 await self.__shutdown__(ctx)
+            case SudoCommandsEnum.update:
+                await self.__update__(ctx)
             case _:
-                await ctx.respond("nyot a vawid command :rolling_eyes:")
+                await ctx.respond("That was not a valid command!", ephemeral=True)
             
 
     async def __echo__(self, ctx: discord.ApplicationContext, message: str):
@@ -50,11 +53,11 @@ class SudoCommands(commands.Cog):
 
     async def __debug_mode__(self, ctx: discord.ApplicationContext):
         self.bot.debugmode = not self.bot.debugmode
-        await ctx.respond(f"debug mode is now {self.bot.debugmode}")
+        await ctx.respond(f"Debug mode is now {self.bot.debugmode}", ephemeral=True)
 
 
     async def __reload__(self, ctx: discord.ApplicationContext):
-        print("wewoading extensions")
+        print("Reloading the extensions", ephemeral=True)
         extensions = list(self.bot.extensions.keys())
         for extension in extensions:
             try:
@@ -66,11 +69,13 @@ class SudoCommands(commands.Cog):
 
 
     async def __restart__(self, ctx: discord.ApplicationContext):
-        await ctx.respond("westawting")
+        await ctx.respond("Restarting the bot", ephemeral=True)
         try:
+            await self.bot.aiohttp_session.close()
             await self.bot.close()
         except Exception as exp:
             print(exp)
+            await self.bot.aiohttp_session.close()
             await self.bot.close()
             exit(0)
         finally:
@@ -78,10 +83,19 @@ class SudoCommands(commands.Cog):
 
 
     async def __shutdown__(self, ctx: discord.ApplicationContext):
-        await ctx.respond("see you in bed mastew ^w^")
+        await ctx.respond("see you in bed mastew ^w^", ephemeral=True)
         await self.bot.aiohttp_session.close()
         await self.bot.close()
         exit(0)
+
+    
+    async def __update__(self, ctx: discord.ApplicationContext):
+        os.system("git pull")
+        commit_message = os.popen("git log -1 --pretty=%B").read().strip()
+        commit_hash = os.popen("git rev-parse --short HEAD").read().strip()
+        await ctx.respond(f"Current version is ```{commit_hash}: {commit_message}```", ephemeral=True)
+        # restart the bot
+        await self.__restart__(ctx)
 
 
 def setup(bot):

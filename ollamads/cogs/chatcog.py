@@ -137,6 +137,9 @@ class ChatCommands(commands.Cog):
         """
         Listen for messages and respond to mentions.
         """
+        if not message.guild:
+            return
+
         if message.author.bot:
             return
         
