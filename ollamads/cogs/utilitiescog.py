@@ -9,18 +9,14 @@ import si_prefix
 from discord.ext import commands, bridge
 from datetime import datetime
 from ollamads.backend.util import EmbedColors as ec
+from enum import IntEnum
 
 
-async def _contributorjson(session: aiohttp.ClientSession):
-    headers = {"User-Agent": "ollamads/1.0", "content-type": "text/html"}
-    async with session.get(
-            f"https://api.github.com/repos/diminDDL/discord-ollama/contributors?q=contributions&order=desc",
-            headers=headers) as r:
-        if r.status == 200:
-            jsonstr = await r.json()
-        else:
-            return None
-    return jsonstr
+class UtilityCommandsEnum(IntEnum):
+    """Commands available for utility"""
+    status = 0
+    invite = 1
+    about = 2
 
 
 class UtilityCommands(commands.Cog, name="utility commands"):
@@ -32,9 +28,22 @@ class UtilityCommands(commands.Cog, name="utility commands"):
         self.redis = bot.redis
         self.bot = bot
 
-    @commands.cooldown(1, 5, commands.BucketType.user)
-    @bridge.bridge_command(pass_context=True, aliases=["uptime", "load"])
-    async def status(self, ctx):
+    
+    @commands.slash_command(name="utility")
+    async def utility(self, ctx: discord.ApplicationContext, command: UtilityCommandsEnum):
+        """This command is used to manage the bot. These commands are only available to the bot owner."""
+        match(command):
+            case UtilityCommandsEnum.status:
+                await self.__status__(ctx)
+            case UtilityCommandsEnum.invite:
+                await self.__invite__(ctx)
+            case UtilityCommandsEnum.about:
+                await self.__about__(ctx)
+            case _:
+                await ctx.respond("nyot a vawid command :rolling_eyes:")
+
+
+    async def __status__(self, ctx):
         """
         Displays the status of the bot.
         """
@@ -77,17 +86,16 @@ class UtilityCommands(commands.Cog, name="utility commands"):
             embed.color = 0x47243c
         await ctx.respond(embed=embed)
 
-    @bridge.bridge_command()
-    async def invite(self, ctx):
+
+    async def __invite__(self, ctx):
         # TODO: correct the link
         """This sends you an invite for the bot if you want to add it to one of your servers."""
         await ctx.author.send(
             f"https://discord.com/api/oauth2/authorize?client_id={self.bot.user.id}&permissions=274878318592&scope=bot%20applications.commands"
         )
 
-    @commands.cooldown(1, 5, commands.BucketType.user)
-    @bridge.bridge_command(pass_context=True)
-    async def about(self, ctx):
+
+    async def __about__(self, ctx):
         """
         This command is here to show you what the bot is made of.
         """
@@ -97,36 +105,32 @@ class UtilityCommands(commands.Cog, name="utility commands"):
             description="""A bot that allows you to connect an ollama instance to discord for LLM fun within discord.
                   This bot is licensed under the MIT license is open source and free to use for everyone.
                   The source code is available [here](https://github.com/diminDDL/discord-ollama), feel free to contribute!
-                  This is a fork of the another bot made by ThatRedKite available [here](https://github.com/ThatRedKite/thatkitebot).
                 """
         )
         try:
             embed.set_thumbnail(url=str(self.bot.user.avatar.url))
         except:
             pass
+
         # dictionary for discord username lookup from github username
         # format: "githubusername":"discordID"
         authordict = {
-            "ThatRedKite":"<@249056455552925697>",
             "diminDDL":"<@312591385624576001>", 
-            "Cuprum77":"<@323502550340861963>",
-            "laserpup":"<@357258808105500674>",
-            "woo200":"<@881362093427814440>"
+            "Cuprum77":"<@323502550340861963>"
         }
-        jsonData = await _contributorjson(self.bot.aiohttp_session)
-        # get a list of "login" field values from json string variable jsonData
+
+        jsonData = await self.__contributor_json__(self.bot.aiohttp_session)
         authorlist = [x["login"] for x in jsonData]
-        # if a username contains [bot] remove it from the list
         authorlist = [x for x in authorlist if not x.lower().__contains__("bot")]
-        # need only first 5 contributors in authorlist
         authorlist = authorlist[:5]
+
         embedStr = ""
         for i in authorlist:
             if i in authordict:
                 embedStr += f"{authordict[i]}\n"
             else:
                 embedStr += f"{i}\n"
-        embedStr += "and other [contributors](https://github.com/ThatRedKite/thatkitebot/graphs/contributors)"    
+        embedStr += "and other [contributors](https://github.com/diminDDL/discord-ollama/graphs/contributors)"    
         embed.add_field(
             name="Authors",
             value=embedStr
@@ -140,12 +144,25 @@ class UtilityCommands(commands.Cog, name="utility commands"):
             [psutil](https://github.com/giampaolo/psutil)
             [si_prefix](https://github.com/cfobel/si-prefix)
             [redis-py](https://github.com/redis/redis-py)
+            [ollama](https://github.com/ollama/ollama-python)
             """
         )
 
-        embed.set_footer(text="PiLocator v{}".format(self.bot.version))
+        embed.set_footer(text="Ollamads v{}".format(self.bot.version))
 
         await ctx.respond(embed=embed)
+
+
+    async def __contributor_json__(session: aiohttp.ClientSession):
+        headers = {"User-Agent": "ollamads/1.0", "content-type": "text/html"}
+        async with session.get(
+                f"https://api.github.com/repos/diminDDL/discord-ollama/contributors?q=contributions&order=desc",
+                headers=headers) as r:
+            if r.status == 200:
+                jsonstr = await r.json()
+            else:
+                return None
+        return jsonstr
 
 
 def setup(bot):

@@ -1,3 +1,6 @@
+#  Copyright (c) 2025 diminDDL, Cuprum77
+#  License: MIT License
+
 from discord.commands import SlashCommandGroup
 from discord.ext import commands
 import discord
@@ -39,13 +42,7 @@ class SudoCommands(commands.Cog):
                 await self.__shutdown__(ctx)
             case _:
                 await ctx.respond("nyot a vawid command :rolling_eyes:")
-
-
-    @commands.Cog.listener()
-    async def on_application_command_error(self, ctx: discord.ApplicationContext, error: discord.DiscordException):
-        if isinstance(error, commands.NotOwner):
-            await ctx.respond("haha you weawwy think im ***that*** submissive?!", ephemeral=True)
-
+            
 
     async def __echo__(self, ctx: discord.ApplicationContext, message: str):
         await ctx.respond(message)

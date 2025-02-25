@@ -1,48 +1,55 @@
-#  Copyright (c) 2019-2022 ThatRedKite and contributors
-#  Copyright (c) 2022 diminDDL
+#  Copyright (c) 2025 diminDDL, Cuprum77
 #  License: MIT License
 
 import discord
 from discord.ext import commands, tasks
 from discord.ext.commands.errors import CommandInvokeError
-from ollamads.backend.util import errormsg
 
 
 class ListenerCog(commands.Cog):
     """
-    The perfect place to put random listeners in.
+    ListenerCog is a cog that contains listeners for the bot.
     """
     def __init__(self, bot):
         self.dirname = bot.dirname
         self.bot: discord.Client = bot
 
+
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error: CommandInvokeError):
         match type(error):
             case commands.CommandOnCooldown:
-                await errormsg(ctx, f"Sorry, but this command is on cooldown! Please wait {int(error.retry_after)} seconds.")
+                await ctx.respond(f"Sorry, but this command is on cooldown! Please wait {int(error.retry_after)} seconds.", ephemeral=True)
+
             case commands.CommandInvokeError:
                 if self.bot.debugmode:
-                    await errormsg(ctx, repr(error))
+                    await ctx.respond(repr(error), ephemeral=True)
                 raise error
+            
             case commands.CheckFailure:
-                await errormsg(ctx, "A check has failed! This command might be disabled on the server or you lack permission")
+                await ctx.respond("A check has failed! This command might be disabled on the server or you lack permission", ephemeral=True)
+
             case commands.MissingPermissions:
-                await errormsg(ctx, "Sorry, but you don't have the permissions to do this")
+                await ctx.respond("Sorry, but you don't have the permissions to do this", ephemeral=True)
+
             case commands.NotOwner:
-                await errormsg(ctx, "Only the bot owner can do this! Contact them if needed.")
+                await ctx.respond("haha you weawwy think im ***that*** submissive?!", ephemeral=True)
+
             case commands.ChannelNotFound:
-                await errormsg(ctx, "The channel you specified was not found!")
+                await ctx.respond("The channel you specified was not found!", ephemeral=True)
+
             case commands.RoleNotFound:
-                await errormsg(ctx, "The role you specified was not found!")
+                await ctx.respond("The role you specified was not found!", ephemeral=True)
+
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print("\nbot successfully started!")
+        print("\nBot successfully started!")
         await self.bot.change_presence(
-            activity=discord.Activity(name="-help", type=1),
+            activity=discord.Activity(name="I named myself!", type=1),
             status=discord.Status.online,
         )
+
 
     @commands.Cog.listener()
     async def on_slash_command_error(self, ctx, ex):
