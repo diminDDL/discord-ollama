@@ -5,6 +5,10 @@ from re import T
 import discord
 import asyncio
 import json
+import io
+import base64
+import aiohttp
+import tempfile
 from enum import IntEnum
 from typing import List, Dict
 from datetime import datetime
@@ -37,6 +41,7 @@ class ChatCommands(commands.Cog):
     """
     def __init__(self, bot):
         self.bot: commands.Bot = bot
+        self.default_prompt = self.bot.default_prompt
         self.redis = self.bot.redis
         self.ollama = self.bot.ollama
         self.pp = ProcessPoolExecutor(max_workers=1)    
@@ -139,7 +144,8 @@ class ChatCommands(commands.Cog):
         """
         This command is used to chat with the selected model.
         """
-        await self.__llm_chat__(ctx, message)
+        chat_history = await self.__llm_format_history__(ctx, message)
+        await self.__llm_chat__(ctx, chat_history)
         await ctx.respond("Message sent.", ephemeral=True)
         
 
@@ -185,90 +191,126 @@ class ChatCommands(commands.Cog):
         
         if message.content == "":
             return
-                
-        if self.bot.user in message.mentions:
-            ctx = await self.bot.get_context(message)
-            chat_history = await self.__llm_format_history__(ctx, message.content)
-            await self.__llm_chat__(ctx, chat_history)
+        
+        ctx = await self.bot.get_context(message)
+        message_content = message.content
 
-        elif message.reference and message.reference.message_id: 
+        image_url = []
+        if message.attachments:
+            for attachment in message.attachments:
+                image_url.append(attachment.url)
+
+        if message.reference and message.reference.message_id: 
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
 
+            if referenced_message.author != self.bot.user:
+                if referenced_message.attachments:
+                    for attachment in referenced_message.attachments:
+                        image_url.append(attachment.url)
+
             if referenced_message.author == self.bot.user:
-                ctx = await self.bot.get_context(message)
-                chat_history = await self.__llm_format_history__(ctx, message.content, referenced_message.content)
-                await self.__llm_chat__(ctx, chat_history)
+                await self.__llm_chat__(ctx, message_content, image_url[0])
+            elif self.bot.user in message.mentions:
+                await self.__llm_chat__(ctx, message_content, image_url[0])
+
+        elif self.bot.user in message.mentions:
+            await self.__llm_chat__(ctx, message_content, image_url[0])
 
 
-    async def __llm_format_history__(self, ctx: discord.ApplicationContext, user_message: str, system_message: str = ""):
+    async def __image_to_base64__(self, url):
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    return base64.b64encode(await response.read()).decode("utf-8")
+                
+        return None
+
+
+    async def __llm_chat__(self, ctx: discord.ApplicationContext, message: str, image_url: str = None):
         """
-        Construct chat history for the selected model.
-        """
-        chat_history = []
-
-        try:
-            redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
-            redis_key_history = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:{ctx.author.id}:history"
-            prompt = await self.redis.hget(redis_key, "prompt")
-
-            if not prompt:
-                prompt = self.default_prompt
-                await self.redis.hset(redis_key, "prompt", prompt)
-
-            sys_prompt_template = { "role": "system", "content": prompt }
-            user_prompt_template = { "role": "user", "content": "" }
-
-            # Get chat history from redis
-            chat_history = await self.redis.hget(redis_key_history, "chat_history")
-
-            if chat_history:
-                chat_history = json.loads(chat_history)
-            else:
-                chat_history = []
-            
-            if system_message:
-                chat_history.append({**sys_prompt_template, "content": system_message})
-            else:
-                chat_history.append({**sys_prompt_template, "content": prompt})
-
-            chat_history.append({**user_prompt_template, "content": user_message})
-
-            # If its longer than 10 entries, remove the oldest entry
-            if len(chat_history) > 10:
-                chat_history.pop(0)
-
-            # Save chat history to redis
-            await self.redis.hset(redis_key_history, "chat_history", json.dumps(chat_history))
-
-        except Exception as e:
-            print(f"Failed to format chat history: {e}")
-        
-        return chat_history
-
-
-    async def __llm_chat__(self, ctx: discord.ApplicationContext, chat_history: list):
-        """
-        Chat with the selected model.
+        Chat with the selected model using an image.
         """
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        redis_key_history = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:{ctx.author.id}:history"
         model = await self.redis.hget(redis_key, "model")
 
         if not model:
             return await ctx.respond("No model selected for this channel.")
+        
+        prompt = await self.redis.hget(redis_key, "prompt")
+
+        if not prompt:
+            prompt = self.default_prompt
+            await self.redis.hset(redis_key, "prompt", prompt)
 
         try:
             async with ctx.typing():
+                # Get chat history from redis
+                chat_history = await self.redis.hget(redis_key_history, "chat_history")
+
+                if chat_history:
+                    chat_history = json.loads(chat_history)
+                else:
+                    chat_history = None
+
+                # Fetch image from URL and save to file, if provided
+                image_base64 = []
+                if image_url:
+                    image_base64.append(await self.__image_to_base64__(image_url))
+                else:
+                    image_base64 = None
+
+                if chat_history is None:
+                    chat_history = [
+                        {
+                            "role": "system",
+                            "content": prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": message,
+                        },
+                    ]
+                else:
+                    chat_history.append(
+                        {
+                            "role": "user",
+                            "content": message,
+                        }
+                    )
+
+                if image_base64:
+                    chat_history[-1]["images"] = image_base64
+
                 response = await self.ollama.chat(model=model, messages=chat_history, stream=False)
 
                 # Extract response message from assistant
                 if hasattr(response, "message") and hasattr(response.message, "content"):
                     assistant_reply = response.message.content
-
                     # limit response to 2000 characters
                     if len(assistant_reply) > 2000:
                         assistant_reply = assistant_reply[:2000]
+
+                    # Add response to chat history
+                    chat_history.append(
+                        {
+                            "role": "system",
+                            "content": assistant_reply,
+                        }
+                    )
+
+                    # Clear the oldest entry if chat history is longer than 10 entries
+                    if len(chat_history) > 10:
+                        chat_history.pop(1)
+                        chat_history.pop(2)
                 else:
                     assistant_reply = "Sorry, I couldn't generate a response."
+
+                    # Remove the last user message if the assistant failed to respond
+                    chat_history.pop(-1)
+
+                # Save chat history to redis
+                await self.redis.hset(redis_key_history, "chat_history", json.dumps(chat_history))
 
                 await ctx.respond(assistant_reply)
 
