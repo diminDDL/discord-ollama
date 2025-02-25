@@ -40,7 +40,6 @@ if not Path(os.path.join(datadir, "init_settings.json")).exists():
     settings_dict_empty = {
         "ollama server": "http://localhost:11434",
         "discord token": "",
-        "prefix": "-",
     }
 
     with open(os.path.join(datadir, "init_settings.json"), "w") as f:
@@ -56,7 +55,6 @@ with open(os.path.join(datadir, "init_settings.json"), "r") as f:
         # get the discord token, the tenor api key, and the prefix from the dict
         ollama_server_url = settings_dict["ollama server"]
         discord_token = settings_dict["discord token"]
-        prefix = settings_dict["prefix"]
 
     except json.decoder.JSONDecodeError:
         print("init_settings.json is not valid json. Please fix it.")
@@ -65,10 +63,9 @@ with open(os.path.join(datadir, "init_settings.json"), "r") as f:
 
 # define the bot class
 class ollamads(bridge.Bot):
-    def __init__(self, command_prefix, dirname, help_command=None, description=None, **options):
-        super().__init__(command_prefix, help_command=help_command, description=description, **options)
+    def __init__(self, dirname, help_command=None, description=None, **options):
+        super().__init__(help_command=help_command, description=description, **options)
         # ---static values---
-        self.prefix = command_prefix
         self.ollama_server = ollama_server_url
         # paths
         self.dirname = dirname
@@ -142,7 +139,7 @@ class ollamads(bridge.Bot):
 
 # create the bot instance
 print(f"Starting ollamads v {__version__} ...")
-bot = ollamads(prefix, dirname, intents=intents)
+bot = ollamads(dirname, intents=intents)
 print(f"Loading {len(extensions)} extensions: \n")
 
 # load the cogs aka extensions
