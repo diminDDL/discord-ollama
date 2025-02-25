@@ -2,6 +2,9 @@
 services:
   ollamads:
     build:  .
+    network_mode: "bridge"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./ollamads/:/app/ollamads
       - ./data/:/app/data/
@@ -9,6 +12,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     command: bash -c "cd /app/ && python3 -m ollamads"
+
 
   valkey:
     container_name: ollamads_redis
