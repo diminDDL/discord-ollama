@@ -7,6 +7,7 @@ import requests
 import asyncio
 import functools
 import re
+import json
 from typing import List, Dict
 from datetime import datetime
 from discord.ext import commands
@@ -130,6 +131,17 @@ class ChatCommands(commands.Cog):
             redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
             await self.redis.hset(redis_key, "prompt", message)
             await ctx.respond(f"Prompt set to: ```{message}```")
+
+
+    @chatCmd.command()
+    @commands.guild_only()
+    async def clear(self, ctx: discord.ApplicationContext):
+        """
+        Clear your chat history for this channel.
+        """
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:{ctx.author.id}:history"
+        await self.redis.hdel(redis_key, "chat_history")
+        await ctx.respond("Chat history cleared.", ephemeral=True)
         
 
     @commands.Cog.listener()
@@ -148,46 +160,76 @@ class ChatCommands(commands.Cog):
                 
         if self.bot.user in message.mentions:
             ctx = await self.bot.get_context(message)
-            await self.__llm_chat__(ctx, message.content)
+            chat_history = await self.__llm_format_history__(ctx, message.content)
+            await self.__llm_chat__(ctx, chat_history)
+
         elif message.reference and message.reference.message_id: 
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
 
             if referenced_message.author == self.bot.user:
-                # construct a new message using the referenced message content and the user's message
-                message_content = f"{referenced_message.content}\n{message.content}"
                 ctx = await self.bot.get_context(message)
-                await self.__llm_chat__(ctx, message_content)
+                chat_history = await self.__llm_format_history__(ctx, message.content, referenced_message.content)
+                await self.__llm_chat__(ctx, chat_history)
 
 
-    async def __llm_chat__(self, ctx: discord.ApplicationContext, message: str = ""):
+    async def __llm_format_history__(self, ctx: discord.ApplicationContext, user_message: str, system_message: str = ""):
+        """
+        Construct chat history for the selected model.
+        """
+        chat_history = []
+
+        try:
+            redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+            redis_key_history = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:{ctx.author.id}:history"
+            prompt = await self.redis.hget(redis_key, "prompt")
+
+            if not prompt:
+                prompt = self.default_prompt
+                await self.redis.hset(redis_key, "prompt", prompt)
+
+            sys_prompt_template = { "role": "system", "content": prompt }
+            user_prompt_template = { "role": "user", "content": "" }
+
+            # Get chat history from redis
+            chat_history = await self.redis.hget(redis_key_history, "chat_history")
+
+            if chat_history:
+                chat_history = json.loads(chat_history)
+            else:
+                chat_history = []
+            
+            if system_message:
+                chat_history.append({**sys_prompt_template, "content": system_message})
+            else:
+                chat_history.append({**sys_prompt_template, "content": prompt})
+
+            chat_history.append({**user_prompt_template, "content": user_message})
+
+            # If its longer than 10 entries, remove the oldest entry
+            if len(chat_history) > 10:
+                chat_history.pop(0)
+
+            # Save chat history to redis
+            await self.redis.hset(redis_key_history, "chat_history", json.dumps(chat_history))
+
+        except Exception as e:
+            print(f"Failed to format chat history: {e}")
+        
+        return chat_history
+
+
+    async def __llm_chat__(self, ctx: discord.ApplicationContext, chat_history: list):
         """
         Chat with the selected model.
         """
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
         model = await self.redis.hget(redis_key, "model")
-        prompt = await self.redis.hget(redis_key, "prompt")
-
-        if not prompt:
-            prompt = self.default_prompt
-            await self.redis.hset(redis_key, "prompt", prompt)
 
         if not model:
             return await ctx.respond("No model selected for this channel.")
 
         try:
             async with ctx.typing():
-                # Properly formatted chat history for Ollama
-                chat_history = [
-                    {
-                        "role": "system",
-                        "content": prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": message,
-                    }
-                ]
-
                 response = await self.ollama.chat(model=model, messages=chat_history, stream=False)
 
                 # Extract response message from assistant
