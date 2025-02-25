@@ -49,7 +49,8 @@ class UtilityCommands(commands.Cog, name="utility commands"):
         """
         process = psutil.Process(self.bot.pid)
         mem = process.memory_info()[0]
-        redismem = (self.redis.info())["used_memory"]
+        redismem = await self.redis.info()
+        redismem = redismem["used_memory"]
 
         cpu = psutil.cpu_percent(interval=None)
         ping = round(self.bot.latency * 1000, 1)
@@ -59,17 +60,17 @@ class UtilityCommands(commands.Cog, name="utility commands"):
 
         embed = discord.Embed()
         embed.add_field(name="System status",
-                        value=f"""RAM usage: **{si_prefix.si_format(mem + redismem)}B**
+                        value=f"""CPU usage: **{cpu} %**
+                                RAM usage: **{si_prefix.si_format(mem + redismem)}B**
                                 Redis usage: **{si_prefix.si_format(redismem)}B**
-                                CPU usage: **{cpu} %**
-                                uptime: **{uptime}**
-                                ping: **{ping} ms**""")
+                                Uptime: **{uptime}**
+                                Ping: **{ping} ms**""")
 
-        embed.add_field(name="Bot stats",
-                        value=f"""guilds: **{guilds}**
-                                extensions loaded: **{len(self.bot.extensions)}**
-                                total users: **{total_users}**
-                                bot version: **{self.bot.version}**
+        embed.add_field(name="Bot Stats",
+                        value=f"""Guilds: **{guilds}**
+                                Extensions Loaded: **{len(self.bot.extensions)}**
+                                Total users: **{total_users}**
+                                Bot version: **{self.bot.version}**
                                 """, inline=False)
         try:
             embed.set_thumbnail(url=str(self.bot.user.avatar.url))
@@ -120,9 +121,11 @@ class UtilityCommands(commands.Cog, name="utility commands"):
         }
 
         jsonData = await self.__contributor_json__(self.bot.aiohttp_session)
-        authorlist = [x["login"] for x in jsonData]
-        authorlist = [x for x in authorlist if not x.lower().__contains__("bot")]
-        authorlist = authorlist[:5]
+        authorlist = []
+        if jsonData is not None:
+            authorlist = [x["login"] for x in jsonData]
+            authorlist = [x for x in authorlist if not x.lower().__contains__("bot")]
+            authorlist = authorlist[:5]
 
         embedStr = ""
         for i in authorlist:
@@ -153,15 +156,21 @@ class UtilityCommands(commands.Cog, name="utility commands"):
         await ctx.respond(embed=embed)
 
 
-    async def __contributor_json__(session: aiohttp.ClientSession):
+    async def __contributor_json__(self, session: aiohttp.ClientSession):
         headers = {"User-Agent": "ollamads/1.0", "content-type": "text/html"}
-        async with session.get(
-                f"https://api.github.com/repos/diminDDL/discord-ollama/contributors?q=contributions&order=desc",
-                headers=headers) as r:
-            if r.status == 200:
-                jsonstr = await r.json()
-            else:
-                return None
+        jsonstr = ""
+
+        try:
+            async with session.get(
+                    f"https://api.github.com/repos/diminDDL/discord-ollama/contributors?q=contributions&order=desc",
+                    headers=headers) as r:
+                if r.status == 200:
+                    jsonstr = await r.json()
+                else:
+                    return None
+        except Exception as e:
+            print(e)
+
         return jsonstr
 
 

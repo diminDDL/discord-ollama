@@ -40,6 +40,7 @@ if not Path(os.path.join(datadir, "init_settings.json")).exists():
     settings_dict_empty = {
         "ollama server": "http://localhost:11434",
         "discord token": "",
+        "default prompt": "What do you want to say?",
     }
 
     with open(os.path.join(datadir, "init_settings.json"), "w") as f:
@@ -55,6 +56,7 @@ with open(os.path.join(datadir, "init_settings.json"), "r") as f:
         # get the discord token, the tenor api key, and the prefix from the dict
         ollama_server_url = settings_dict["ollama server"]
         discord_token = settings_dict["discord token"]
+        default_prompt = settings_dict["default prompt"]
 
     except json.decoder.JSONDecodeError:
         print("init_settings.json is not valid json. Please fix it.")
@@ -67,6 +69,7 @@ class ollamads(bridge.Bot):
         super().__init__(help_command=help_command, description=description, **options)
         # ---static values---
         self.ollama_server = ollama_server_url
+        self.default_prompt = default_prompt
         # paths
         self.dirname = dirname
         self.datadir = "/app/data/"

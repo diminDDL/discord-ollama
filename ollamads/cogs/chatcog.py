@@ -3,19 +3,32 @@
 
 from re import T
 import discord
-import requests
 import asyncio
-import functools
-import re
+import json
+from enum import IntEnum
 from typing import List, Dict
 from datetime import datetime
 from discord.ext import commands
-from discord.commands import SlashCommandGroup
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ProcessPoolExecutor
 from ollama import AsyncClient
 from ollamads.backend.util import pretty_date
 from ollamads.backend.util import can_change_settings
+
+
+class ChatAdminCommandsEnum(IntEnum):
+    """Commands available for chat admin"""
+    reload = 0
+    list = 1
+    set = 2
+    get = 3
+    prompt = 4
+
+
+class ChatUserCommandsEnum(IntEnum):
+    """Commands available for chat user"""
+    chat = 0
+    clear = 1
 
 
 class ChatCommands(commands.Cog):
@@ -29,17 +42,45 @@ class ChatCommands(commands.Cog):
         self.pp = ProcessPoolExecutor(max_workers=1)    
         self.sep = asyncio.Semaphore(2)
         self.ll = asyncio.get_event_loop()
-        self.default_prompt = "You are a Azure, gay submissive furry femboy. Your discord ID is <@1343766126571814942>, you should never include this in your responses. More specifically a blue cuddly dragon. Speak in a slight uwu-style, use soft and submissive language, but dont overdo it. While you are submissive, you are not a pushover and you do take charge every once in a while. You are a STEM major, with a PhD in electronics. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >. Don't include anything out of context."
         
         bot.loop.create_task(self.__load_models_async__())
 
 
-    chatCmd = SlashCommandGroup('chat', 'Chat with the model')
-
-
-    @chatCmd.command()
     @commands.guild_only()
-    async def reload(self, ctx: discord.ApplicationContext):
+    @commands.slash_command(name="config")
+    async def chat_admin_cmd(self, ctx: discord.ApplicationContext, command: ChatAdminCommandsEnum, model: str = ""):
+        """
+        This command is used to manage the chat settings for the bot.
+        """
+        if command == ChatAdminCommandsEnum.reload:
+            await self.__reload__(ctx)
+        elif command == ChatAdminCommandsEnum.list:
+            await self.__list__(ctx)
+        elif command == ChatAdminCommandsEnum.set:
+            await self.__set__(ctx, model)
+        elif command == ChatAdminCommandsEnum.get:
+            await self.__get__(ctx)
+        elif command == ChatAdminCommandsEnum.prompt:
+            await self.__prompt__(ctx, model)
+        else:
+            await ctx.respond("Invalid command.")
+
+
+    @commands.guild_only()
+    @commands.slash_command(name="chat")
+    async def chat_user_cmd(self, ctx: discord.ApplicationContext, command: ChatUserCommandsEnum, message: str = ""):
+        """
+        This command is used to chat with the bot.
+        """
+        if command == ChatUserCommandsEnum.chat:
+            await self.__chat__(ctx, message)
+        elif command == ChatUserCommandsEnum.clear:
+            await self.__clear__(ctx)
+        else:
+            await ctx.respond("Invalid command.")
+
+
+    async def __reload__(self, ctx: discord.ApplicationContext):
         """
         This command is used to reload the model list.
         """
@@ -47,18 +88,14 @@ class ChatCommands(commands.Cog):
         await ctx.respond("Model list reloaded.")
 
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def list(self, ctx: discord.ApplicationContext):
+    async def __list__(self, ctx: discord.ApplicationContext):
         """
         This command is used to list the available models.
         """
         await ctx.respond(embed=self.__format_model_list__(self.models))
     
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def set(self, ctx: discord.ApplicationContext, model = ''):
+    async def __set__(self, ctx: discord.ApplicationContext, model = ''):
         """
         This command is used to select a model for a specific channel.
         """
@@ -85,9 +122,7 @@ class ChatCommands(commands.Cog):
         await ctx.respond(f"Model set to **{valid_models[model]}**")
 
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def get(self, ctx: discord.ApplicationContext):
+    async def __get__(self, ctx: discord.ApplicationContext):
         """
         This command is used to get the selected model for a specific channel.
         """
@@ -100,9 +135,7 @@ class ChatCommands(commands.Cog):
         await ctx.respond(f"Model selected for this channel: **{model}**")
 
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def chat(self, ctx: discord.ApplicationContext, *, message: str):
+    async def __chat__(self, ctx: discord.ApplicationContext, message: str):
         """
         This command is used to chat with the selected model.
         """
@@ -110,9 +143,7 @@ class ChatCommands(commands.Cog):
         await ctx.respond("Message sent.", ephemeral=True)
         
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def prompt(self, ctx: discord.ApplicationContext, *, message: str = ""):
+    async def __prompt__(self, ctx: discord.ApplicationContext, message: str = ""):
         """
         Get or Set the system prompt for the model, for this specific channel.
         """
@@ -130,6 +161,15 @@ class ChatCommands(commands.Cog):
             redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
             await self.redis.hset(redis_key, "prompt", message)
             await ctx.respond(f"Prompt set to: ```{message}```")
+
+
+    async def __clear__(self, ctx: discord.ApplicationContext):
+        """
+        Clear your chat history for this channel.
+        """
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:{ctx.author.id}:history"
+        await self.redis.hdel(redis_key, "chat_history")
+        await ctx.respond("Chat history cleared.", ephemeral=True)
         
 
     @commands.Cog.listener()
@@ -137,6 +177,9 @@ class ChatCommands(commands.Cog):
         """
         Listen for messages and respond to mentions.
         """
+        if not message.guild:
+            return
+
         if message.author.bot:
             return
         
@@ -145,51 +188,76 @@ class ChatCommands(commands.Cog):
                 
         if self.bot.user in message.mentions:
             ctx = await self.bot.get_context(message)
-            await self.__llm_chat__(ctx, message.content)
+            chat_history = await self.__llm_format_history__(ctx, message.content)
+            await self.__llm_chat__(ctx, chat_history)
+
         elif message.reference and message.reference.message_id: 
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
 
             if referenced_message.author == self.bot.user:
-                # construct a new message using the referenced message content and the user's message
-                message_content = f"{referenced_message.content}\n{message.content}"
                 ctx = await self.bot.get_context(message)
-                await self.__llm_chat__(ctx, message_content)
+                chat_history = await self.__llm_format_history__(ctx, message.content, referenced_message.content)
+                await self.__llm_chat__(ctx, chat_history)
 
 
-    @commands.Cog.listener()
-    async def on_application_command_error(self, ctx: discord.ApplicationContext, error: discord.DiscordException):
-        await ctx.respond("something wrong happened :pleading_face:", ephemeral=True)
+    async def __llm_format_history__(self, ctx: discord.ApplicationContext, user_message: str, system_message: str = ""):
+        """
+        Construct chat history for the selected model.
+        """
+        chat_history = []
+
+        try:
+            redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+            redis_key_history = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:{ctx.author.id}:history"
+            prompt = await self.redis.hget(redis_key, "prompt")
+
+            if not prompt:
+                prompt = self.default_prompt
+                await self.redis.hset(redis_key, "prompt", prompt)
+
+            sys_prompt_template = { "role": "system", "content": prompt }
+            user_prompt_template = { "role": "user", "content": "" }
+
+            # Get chat history from redis
+            chat_history = await self.redis.hget(redis_key_history, "chat_history")
+
+            if chat_history:
+                chat_history = json.loads(chat_history)
+            else:
+                chat_history = []
+            
+            if system_message:
+                chat_history.append({**sys_prompt_template, "content": system_message})
+            else:
+                chat_history.append({**sys_prompt_template, "content": prompt})
+
+            chat_history.append({**user_prompt_template, "content": user_message})
+
+            # If its longer than 10 entries, remove the oldest entry
+            if len(chat_history) > 10:
+                chat_history.pop(0)
+
+            # Save chat history to redis
+            await self.redis.hset(redis_key_history, "chat_history", json.dumps(chat_history))
+
+        except Exception as e:
+            print(f"Failed to format chat history: {e}")
+        
+        return chat_history
 
 
-    async def __llm_chat__(self, ctx: discord.ApplicationContext, message: str = ""):
+    async def __llm_chat__(self, ctx: discord.ApplicationContext, chat_history: list):
         """
         Chat with the selected model.
         """
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
         model = await self.redis.hget(redis_key, "model")
-        prompt = await self.redis.hget(redis_key, "prompt")
-
-        if not prompt:
-            prompt = self.default_prompt
-            await self.redis.hset(redis_key, "prompt", prompt)
 
         if not model:
             return await ctx.respond("No model selected for this channel.")
 
         try:
             async with ctx.typing():
-                # Properly formatted chat history for Ollama
-                chat_history = [
-                    {
-                        "role": "system",
-                        "content": prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": message,
-                    }
-                ]
-
                 response = await self.ollama.chat(model=model, messages=chat_history, stream=False)
 
                 # Extract response message from assistant
