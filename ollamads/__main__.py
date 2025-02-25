@@ -1,4 +1,4 @@
-#  Copyright (c) 2025 diminDDL and Cuprum
+#  Copyright (c) 2025 diminDDL, Cuprum77
 #  License: MIT License
 
 import os
@@ -22,9 +22,8 @@ __author__ = "diminDDL and Cuprum"
 extensions = [
     "sudocog",
     "chatcog",
-    # "help",
-    # "utilitiescog",
-    # "listenercog",
+    "utilitiescog",
+    "listenercog",
 ]
 
 tempdir = "/tmp/ollamads/"
