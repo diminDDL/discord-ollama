@@ -1,0 +1,6 @@
+aiohttp
+requests
+psutil
+setuptools
+si-prefix
+ollama

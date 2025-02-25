@@ -1,0 +1,19 @@
+# Based on https://github.com/ThatRedKite/thatkitebot/
+services:
+  ollamads:
+    build:  .
+    volumes:
+      - ./ollamads/:/app/ollamads
+      - ./data/:/app/data/
+    restart:  "unless-stopped"
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: bash -c "cd /app/ && python3 -m ollamads"
+
+  valkey:
+    container_name: ollamads_redis
+    volumes:
+      - ./data/redis:/data
+    image: "valkey/valkey:latest"
+    entrypoint: valkey-server --appendonly yes
+    restart:  "unless-stopped"
