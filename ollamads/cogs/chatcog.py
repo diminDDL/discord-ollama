@@ -1,3 +1,6 @@
+#  Copyright (c) 2025 diminDDL, Cuprum77
+#  License: MIT License
+
 from re import T
 import discord
 import requests
@@ -26,6 +29,7 @@ class ChatCommands(commands.Cog):
         self.pp = ProcessPoolExecutor(max_workers=1)    
         self.sep = asyncio.Semaphore(2)
         self.ll = asyncio.get_event_loop()
+        self.default_prompt = "You are a Azure, gay submissive furry femboy. Your discord ID is <@1343766126571814942>, you should never include this in your responses. More specifically a blue cuddly dragon. Speak in a slight uwu-style, use soft and submissive language, but dont overdo it. While you are submissive, you are not a pushover and you do take charge every once in a while. You are a STEM major, with a PhD in electronics. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >. Don't include anything out of context."
         
         bot.loop.create_task(self.__load_models_async__())
 
@@ -104,7 +108,29 @@ class ChatCommands(commands.Cog):
         """
         await self.__llm_chat__(ctx, message)
         await ctx.respond("Message sent.", ephemeral=True)
+        
 
+    @chatCmd.command()
+    @commands.guild_only()
+    async def prompt(self, ctx: discord.ApplicationContext, *, message: str = ""):
+        """
+        Get or Set the system prompt for the model, for this specific channel.
+        """
+        if message is None or message == "":
+            redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+            prompt = await self.redis.hget(redis_key, "prompt")
+
+            if not prompt:
+                prompt = self.default_prompt
+                await self.redis.hset(redis_key, "prompt", prompt)
+
+            await ctx.respond(f"Current prompt: ```{prompt}```")
+
+        else:
+            redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+            await self.redis.hset(redis_key, "prompt", message)
+            await ctx.respond(f"Prompt set to: ```{message}```")
+        
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -141,6 +167,11 @@ class ChatCommands(commands.Cog):
         """
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
         model = await self.redis.hget(redis_key, "model")
+        prompt = await self.redis.hget(redis_key, "prompt")
+
+        if not prompt:
+            prompt = self.default_prompt
+            await self.redis.hset(redis_key, "prompt", prompt)
 
         if not model:
             return await ctx.respond("No model selected for this channel.")
@@ -151,8 +182,7 @@ class ChatCommands(commands.Cog):
                 chat_history = [
                     {
                         "role": "system",
-                        # "content": "You are a submissive femboy furry. Speak in uwu-style, use soft and submissive language, and be flirty. However, you are still intelligent, since most femboy furries hold PhDs or are self-taught in obscure or technical subjects. Don't include anything out of context. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >."
-                        "content": "You are a Azure, gay submissive furry femboy. Your discord ID is <@1343766126571814942>, you should never include this in your responses. More specifically a blue cuddly dragon. Speak in a slight uwu-style, use soft and submissive language, but dont overdo it. You are a STEM major, with a PhD in electronics. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >. Don't include anything out of context. Do not include the <think></think> data.",
+                        "content": prompt,
                     },
                     {
                         "role": "user",
