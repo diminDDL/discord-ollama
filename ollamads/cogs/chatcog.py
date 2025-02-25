@@ -3,20 +3,32 @@
 
 from re import T
 import discord
-import requests
 import asyncio
-import functools
-import re
 import json
+from enum import IntEnum
 from typing import List, Dict
 from datetime import datetime
 from discord.ext import commands
-from discord.commands import SlashCommandGroup
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ProcessPoolExecutor
 from ollama import AsyncClient
 from ollamads.backend.util import pretty_date
 from ollamads.backend.util import can_change_settings
+
+
+class ChatAdminCommandsEnum(IntEnum):
+    """Commands available for chat admin"""
+    reload = 0
+    list = 1
+    set = 2
+    get = 3
+    prompt = 4
+
+
+class ChatUserCommandsEnum(IntEnum):
+    """Commands available for chat user"""
+    chat = 0
+    clear = 1
 
 
 class ChatCommands(commands.Cog):
@@ -35,12 +47,41 @@ class ChatCommands(commands.Cog):
         bot.loop.create_task(self.__load_models_async__())
 
 
-    chatCmd = SlashCommandGroup('chat', 'Chat with the model')
-
-
-    @chatCmd.command()
     @commands.guild_only()
-    async def reload(self, ctx: discord.ApplicationContext):
+    @commands.slash_command(name="config")
+    async def chat_admin_cmd(self, ctx: discord.ApplicationContext, command: ChatAdminCommandsEnum, model: str = ""):
+        """
+        This command is used to manage the chat settings for the bot.
+        """
+        if command == ChatAdminCommandsEnum.reload:
+            await self.__reload__(ctx)
+        elif command == ChatAdminCommandsEnum.list:
+            await self.__list__(ctx)
+        elif command == ChatAdminCommandsEnum.set:
+            await self.__set__(ctx, model)
+        elif command == ChatAdminCommandsEnum.get:
+            await self.__get__(ctx)
+        elif command == ChatAdminCommandsEnum.prompt:
+            await self.__prompt__(ctx, model)
+        else:
+            await ctx.respond("Invalid command.")
+
+
+    @commands.guild_only()
+    @commands.slash_command(name="chat")
+    async def chat_user_cmd(self, ctx: discord.ApplicationContext, command: ChatUserCommandsEnum, message: str = ""):
+        """
+        This command is used to chat with the bot.
+        """
+        if command == ChatUserCommandsEnum.chat:
+            await self.__chat__(ctx, message)
+        elif command == ChatUserCommandsEnum.clear:
+            await self.__clear__(ctx)
+        else:
+            await ctx.respond("Invalid command.")
+
+
+    async def __reload__(self, ctx: discord.ApplicationContext):
         """
         This command is used to reload the model list.
         """
@@ -48,18 +89,14 @@ class ChatCommands(commands.Cog):
         await ctx.respond("Model list reloaded.")
 
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def list(self, ctx: discord.ApplicationContext):
+    async def __list__(self, ctx: discord.ApplicationContext):
         """
         This command is used to list the available models.
         """
         await ctx.respond(embed=self.__format_model_list__(self.models))
     
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def set(self, ctx: discord.ApplicationContext, model = ''):
+    async def __set__(self, ctx: discord.ApplicationContext, model = ''):
         """
         This command is used to select a model for a specific channel.
         """
@@ -86,9 +123,7 @@ class ChatCommands(commands.Cog):
         await ctx.respond(f"Model set to **{valid_models[model]}**")
 
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def get(self, ctx: discord.ApplicationContext):
+    async def __get__(self, ctx: discord.ApplicationContext):
         """
         This command is used to get the selected model for a specific channel.
         """
@@ -101,9 +136,7 @@ class ChatCommands(commands.Cog):
         await ctx.respond(f"Model selected for this channel: **{model}**")
 
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def chat(self, ctx: discord.ApplicationContext, *, message: str):
+    async def __chat__(self, ctx: discord.ApplicationContext, message: str):
         """
         This command is used to chat with the selected model.
         """
@@ -111,9 +144,7 @@ class ChatCommands(commands.Cog):
         await ctx.respond("Message sent.", ephemeral=True)
         
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def prompt(self, ctx: discord.ApplicationContext, *, message: str = ""):
+    async def __prompt__(self, ctx: discord.ApplicationContext, message: str = ""):
         """
         Get or Set the system prompt for the model, for this specific channel.
         """
@@ -133,9 +164,7 @@ class ChatCommands(commands.Cog):
             await ctx.respond(f"Prompt set to: ```{message}```")
 
 
-    @chatCmd.command()
-    @commands.guild_only()
-    async def clear(self, ctx: discord.ApplicationContext):
+    async def __clear__(self, ctx: discord.ApplicationContext):
         """
         Clear your chat history for this channel.
         """
