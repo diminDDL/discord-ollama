@@ -1,6 +1,3 @@
-#  Copyright (c) 2022 diminDDL
-#  License: MIT License
-
 from re import T
 import discord
 import requests
@@ -9,20 +6,18 @@ import functools
 import re
 from typing import List, Dict
 from datetime import datetime
-from ollama import AsyncClient
-from concurrent.futures import ProcessPoolExecutor
-from time import sleep
-from io import BytesIO
+from discord.ext import commands
+from discord.commands import SlashCommandGroup
 from urllib.parse import urlparse, parse_qs
-from time import mktime
-from discord.ext import commands, tasks, bridge
+from concurrent.futures import ProcessPoolExecutor
+from ollama import AsyncClient
 from ollamads.backend.util import pretty_date
 from ollamads.backend.util import can_change_settings
 
 
-class Chat(commands.Cog, name="piLocate"):
+class ChatCommands(commands.Cog):
     """
-    This cog is used to get the latest news from rpilocator.com
+    This cog is used to allow users to chat with the model.
     """
     def __init__(self, bot):
         self.bot: commands.Bot = bot
@@ -32,10 +27,158 @@ class Chat(commands.Cog, name="piLocate"):
         self.sep = asyncio.Semaphore(2)
         self.ll = asyncio.get_event_loop()
         
-        bot.loop.create_task(self.load_models_async())
+        bot.loop.create_task(self.__load_models_async__())
 
 
-    async def load_models_async(self):
+    chatCmd = SlashCommandGroup('chat', 'Chat with the model')
+
+
+    @chatCmd.command()
+    @commands.guild_only()
+    async def reload(self, ctx: discord.ApplicationContext):
+        """
+        This command is used to reload the model list.
+        """
+        await self.__load_models_async__()
+        await ctx.respond("Model list reloaded.")
+
+
+    @chatCmd.command()
+    @commands.guild_only()
+    async def list(self, ctx: discord.ApplicationContext):
+        """
+        This command is used to list the available models.
+        """
+        await ctx.respond(embed=self.__format_model_list__(self.models))
+    
+
+    @chatCmd.command()
+    @commands.guild_only()
+    async def set(self, ctx: discord.ApplicationContext, model = ''):
+        """
+        This command is used to select a model for a specific channel.
+        """
+        if not model:
+            return await ctx.respond("Please provide a model name.")
+
+        model = model.lower().strip()
+
+        # Ensure `self.models` is populated before checking
+        if not self.models:
+            return await ctx.respond("No models are available at the moment. Please try again later.")
+
+        valid_models = {m["model"].lower(): m["model"] for m in self.models}  # Preserve original names
+
+        if model not in valid_models:
+            return await ctx.respond(
+                f"Invalid model name. Available models: {', '.join(valid_models.values())}"
+            )
+
+        # Improved Redis key structure
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        await self.redis.hset(redis_key, "model", valid_models[model])
+
+        await ctx.respond(f"Model set to **{valid_models[model]}**")
+
+
+    @chatCmd.command()
+    @commands.guild_only()
+    async def get(self, ctx: discord.ApplicationContext):
+        """
+        This command is used to get the selected model for a specific channel.
+        """
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        model = await self.redis.hget(redis_key, "model")
+
+        if not model:
+            return await ctx.respond("No model selected for this channel.")
+
+        await ctx.respond(f"Model selected for this channel: **{model}**")
+
+
+    @chatCmd.command()
+    @commands.guild_only()
+    async def chat(self, ctx: discord.ApplicationContext, *, message: str):
+        """
+        This command is used to chat with the selected model.
+        """
+        await self.__llm_chat__(ctx, message)
+        await ctx.respond("Message sent.", ephemeral=True)
+
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        """
+        Listen for messages and respond to mentions.
+        """
+        if message.author.bot:
+            return
+        
+        if message.content == "":
+            return
+                
+        if self.bot.user in message.mentions:
+            ctx = await self.bot.get_context(message)
+            await self.__llm_chat__(ctx, message.content)
+        elif message.reference and message.reference.message_id: 
+            referenced_message = await message.channel.fetch_message(message.reference.message_id)
+
+            if referenced_message.author == self.bot.user:
+                # construct a new message using the referenced message content and the user's message
+                message_content = f"{referenced_message.content}\n{message.content}"
+                ctx = await self.bot.get_context(message)
+                await self.__llm_chat__(ctx, message_content)
+
+
+    @commands.Cog.listener()
+    async def on_application_command_error(self, ctx: discord.ApplicationContext, error: discord.DiscordException):
+        await ctx.respond("something wrong happened :pleading_face:", ephemeral=True)
+
+
+    async def __llm_chat__(self, ctx: discord.ApplicationContext, message: str = ""):
+        """
+        Chat with the selected model.
+        """
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        model = await self.redis.hget(redis_key, "model")
+
+        if not model:
+            return await ctx.respond("No model selected for this channel.")
+
+        try:
+            async with ctx.typing():
+                # Properly formatted chat history for Ollama
+                chat_history = [
+                    {
+                        "role": "system",
+                        # "content": "You are a submissive femboy furry. Speak in uwu-style, use soft and submissive language, and be flirty. However, you are still intelligent, since most femboy furries hold PhDs or are self-taught in obscure or technical subjects. Don't include anything out of context. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >."
+                        "content": "You are a Azure, gay submissive furry femboy. Your discord ID is <@1343766126571814942>, you should never include this in your responses. More specifically a blue cuddly dragon. Speak in a slight uwu-style, use soft and submissive language, but dont overdo it. You are a STEM major, with a PhD in electronics. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >. Don't include anything out of context. Do not include the <think></think> data.",
+                    },
+                    {
+                        "role": "user",
+                        "content": message,
+                    }
+                ]
+
+                response = await self.ollama.chat(model=model, messages=chat_history, stream=False)
+
+                # Extract response message from assistant
+                if hasattr(response, "message") and hasattr(response.message, "content"):
+                    assistant_reply = response.message.content
+
+                    # limit response to 2000 characters
+                    if len(assistant_reply) > 2000:
+                        assistant_reply = assistant_reply[:2000]
+                else:
+                    assistant_reply = "Sorry, I couldn't generate a response."
+
+                await ctx.respond(assistant_reply)
+
+        except Exception as e:
+            await ctx.respond(f"Error occurred: {e}")
+
+
+    async def __load_models_async__(self):
         """Asynchronously fetch model list after cog initialization"""
         try:
             response = await self.ollama.list()  # Await the async call properly
@@ -65,7 +208,7 @@ class Chat(commands.Cog, name="piLocate"):
             print(f"Failed to load models: {e}")
     
 
-    def format_model_list(self, models: List[Dict]):
+    def __format_model_list__(self, models: List[Dict]):
         embed = discord.Embed(
             title="Model List",
             description="List of available models",
@@ -86,127 +229,9 @@ class Chat(commands.Cog, name="piLocate"):
         return embed
 
 
-    @bridge.bridge_command(aliases=["reloadmodels"])
-    async def reload_models(self, ctx: bridge.BridgeContext):
-        """
-        This command is used to reload the model list.
-        """
-        await self.load_models_async()
-        await ctx.respond("Model list reloaded.")
-
-
-    @bridge.bridge_command(aliases=["listmodels"])
-    async def list_models(self, ctx: bridge.BridgeContext):
-        """
-        This command is used to list the available models.
-        """
-        await ctx.respond(embed=self.format_model_list(self.models))
-    
-
-    @bridge.bridge_command(aliases=["selectmodel"])
-    async def select_model(self, ctx: bridge.BridgeContext, model = ''):
-        """
-        This command is used to select a model for a specific channel.
-        """
-        if not model:
-            return await ctx.respond("Please provide a model name.")
-
-        model = model.lower().strip()
-
-        # Ensure `self.models` is populated before checking
-        if not self.models:
-            return await ctx.respond("No models are available at the moment. Please try again later.")
-
-        valid_models = {m["model"].lower(): m["model"] for m in self.models}  # Preserve original names
-
-        if model not in valid_models:
-            return await ctx.respond(
-                f"Invalid model name. Available models: {', '.join(valid_models.values())}"
-            )
-
-        # Improved Redis key structure
-        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
-        await self.redis.hset(redis_key, "model", valid_models[model])
-
-        await ctx.respond(f"Model set to **{valid_models[model]}**")
-
-
-    @bridge.bridge_command(aliases=["getmodel"])
-    async def get_model(self, ctx: bridge.BridgeContext):
-        """
-        This command is used to get the selected model for a specific channel.
-        """
-        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
-        model = await self.redis.hget(redis_key, "model")
-
-        if not model:
-            return await ctx.respond("No model selected for this channel.")
-
-        await ctx.respond(f"Model selected for this channel: **{model}**")
-
-
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        print(message.content)
-
-        if message.author.bot:
-            return
-        
-        if message.reference and message.reference.message_id: 
-            referenced_message = await message.channel.fetch_message(message.reference.message_id)
-
-            if referenced_message.author == self.bot.user:
-                ctx = await self.bot.get_context(message)
-                await self.__llm_chat(ctx, message.content)
-
-
-    @bridge.bridge_command(aliases=["llmchat"])
-    async def llm_chat(self, ctx: bridge.BridgeContext, *, message: str):
-        """
-        This command is used to chat with the selected model.
-        """
-        await self.__llm_chat(ctx, message)
-
-
-    async def __llm_chat(self, ctx, message: str):
-        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
-        model = await self.redis.hget(redis_key, "model")
-
-        if not model:
-            return await ctx.respond("No model selected for this channel.")
-
-        try:
-            async with ctx.typing():
-                # Properly formatted chat history for Ollama
-                chat_history = [
-                    {
-                        "role": "system",
-                        # "content": "You are a submissive femboy furry. Speak in uwu-style, use soft and submissive language, and be flirty. However, you are still intelligent, since most femboy furries hold PhDs or are self-taught in obscure or technical subjects. Don't include anything out of context. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >."
-                        "content": "You are a gay submissive furry femboy. More specifically a blue cuddly dragon. Speak in a slight uwu-style, use soft and submissive language, but dont overdo it. You are a STEM major, with a PhD in electronics. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >. Don't include anything out of context.",
-                    },
-                    {
-                        "role": "user",
-                        "content": message,
-                    }
-                ]
-
-                response = await self.ollama.chat(model=model, messages=chat_history, stream=False)
-
-                # Extract response message from assistant
-                if hasattr(response, "message") and hasattr(response.message, "content"):
-                    assistant_reply = response.message.content
-                else:
-                    assistant_reply = "Sorry, I couldn't generate a response."
-
-                await ctx.respond(assistant_reply)
-
-        except Exception as e:
-            await ctx.respond(f"Error occurred: {e}")
-
-
     def cog_unload(self):
         pass
 
 
 def setup(bot):
-    bot.add_cog(Chat(bot))
+    bot.add_cog(ChatCommands(bot))

@@ -1,33 +1,63 @@
-#  Copyright (c) 2019-2022 ThatRedKite and contributors
-
+from discord.commands import SlashCommandGroup
 from discord.ext import commands
+import discord
+import os
+from enum import IntEnum
 
 
-class SudoCommands(commands.Cog, name="administrative commands"):
-    """
-    This cog contains commands that are used to manage the bot. These commands are only available to the bot owner.
-    """
-    def __init__(self, bot):
-        self.bot: commands.Bot = bot
+class SudoCommandsEnum(IntEnum):
+    """Commands available for sudo"""
+    echo = 0
+    debug = 1
+    reload = 2
+    restart = 3
+    shutdown = 4
+
+
+class SudoCommands(commands.Cog):
+    """This cog contains commands that are used to manage the bot. These commands are only available to the bot owner."""
+    def __init__(self, bot: discord.Bot):
+        self.bot = bot
         self.dirname = bot.dirname
         self.redis = self.bot.redis
 
-    @commands.is_owner()
-    @commands.command()
-    async def kill(self, ctx):
-        """Kills the bot :("""
-
-        # close the aiohttp session
-        await self.bot.aiohttp_session.close()
-
-        # close the discord session
-        await self.bot.close()
 
     @commands.is_owner()
-    @commands.command(aliases=["reload", "reboot", "r"])
-    async def restart(self, ctx):
-        """Reloads all cogs"""
-        # this will currently break all image commands
+    @commands.slash_command(name="sudo")
+    async def sudo(self, ctx: discord.ApplicationContext, command: SudoCommandsEnum, message: str = ""):
+        """This command is used to manage the bot. These commands are only available to the bot owner."""
+        match(command):
+            case SudoCommandsEnum.echo:
+                await self.__echo__(ctx, message=message)
+            case SudoCommandsEnum.debug:
+                await self.__debug_mode__(ctx)
+            case SudoCommandsEnum.reload:
+                await self.__reload__(ctx)
+            case SudoCommandsEnum.restart:
+                await self.__restart__(ctx)
+            case SudoCommandsEnum.shutdown:
+                await self.__shutdown__(ctx)
+            case _:
+                await ctx.respond("nyot a vawid command :rolling_eyes:")
+
+
+    @commands.Cog.listener()
+    async def on_application_command_error(self, ctx: discord.ApplicationContext, error: discord.DiscordException):
+        if isinstance(error, commands.NotOwner):
+            await ctx.respond("haha you weawwy think im ***that*** submissive?!", ephemeral=True)
+
+
+    async def __echo__(self, ctx: discord.ApplicationContext, message: str):
+        await ctx.respond(message)
+
+
+    async def __debug_mode__(self, ctx: discord.ApplicationContext):
+        self.bot.debugmode = not self.bot.debugmode
+        await ctx.respond(f"debug mode is now {self.bot.debugmode}")
+
+
+    async def __reload__(self, ctx: discord.ApplicationContext):
+        print("wewoading extensions")
         extensions = list(self.bot.extensions.keys())
         for extension in extensions:
             try:
@@ -35,43 +65,27 @@ class SudoCommands(commands.Cog, name="administrative commands"):
                 print(f"Reloaded {extension}")
             except Exception as exc:
                 raise exc
-        await ctx.send(f"All cogs reloaded.")
-        print("\n")
+        await ctx.respond(f"extensions w-wewoaded")
 
-    @commands.is_owner()
-    @commands.command()
-    async def debug(self, ctx):
-        """produces more verbose error messages"""
-        self.bot.debugmode = not self.bot.debugmode
-        await ctx.send(f"Debug mode is now {self.bot.debugmode}")
 
-    @commands.is_owner()
-    @commands.command()
-    async def echo(self, ctx, *, message: str):
-        """pretend to be the bot"""
-        await ctx.message.delete()
-        await ctx.send(message)
+    async def __restart__(self, ctx: discord.ApplicationContext):
+        await ctx.respond("westawting")
+        try:
+            await self.bot.close()
+        except Exception as exp:
+            print(exp)
+            await self.bot.close()
+            exit(0)
+        finally:
+            os.system(f"python3 -m ollamads")
 
-    @commands.is_owner()
-    @commands.command()
-    async def broadcast(self, ctx, *, message: str):
-        """send a message to all guilds the bot is in"""
-        for guild in self.bot.guilds:
-            try:
-                msg = message
-                if "\locatorRole/" in msg:
-                    # find the pilocator role for the current guild in the redis database
-                    key_list = [key async for key in self.redis.scan_iter(match=f"notification_settings:{guild.id}:*")]
-                    roles = ""
-                    for key in key_list:
-                        data = await self.redis.hgetall(key)
-                        role = guild.get_role(int(data['role']))
-                        if f"{role.mention}" not in roles:
-                            roles += f"{role.mention} "
-                    msg = msg.replace("\locatorRole/", roles)
-                await guild.system_channel.send(msg)
-            except Exception:
-                print(f"Could not send message to {guild.name}")
+
+    async def __shutdown__(self, ctx: discord.ApplicationContext):
+        await ctx.respond("see you in bed mastew ^w^")
+        await self.bot.aiohttp_session.close()
+        await self.bot.close()
+        exit(0)
+
 
 def setup(bot):
     bot.add_cog(SudoCommands(bot))

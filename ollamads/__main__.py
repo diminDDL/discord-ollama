@@ -1,5 +1,4 @@
-#  Copyright (c) 2019-2022 ThatRedKite and contributors
-#  Copyright (c) 2025 diminDDL
+#  Copyright (c) 2025 diminDDL and Cuprum
 #  License: MIT License
 
 import os
@@ -15,16 +14,17 @@ import asyncio
 from ollama import AsyncClient
 from discord.ext import commands, bridge
 
+
 __name__ = "ollamads"
 __version__ = "1.0"
-__author__ = "diminDDL and ThatRedKite"
+__author__ = "diminDDL and Cuprum"
 
-enabled_ext = [
-    "ollamads.cogs.sudocog",
-    "ollamads.cogs.chatcog",
-    "ollamads.cogs.help",
-    "ollamads.cogs.utilitiescog",
-    "ollamads.cogs.listenercog",
+extensions = [
+    "sudocog",
+    "chatcog",
+    # "help",
+    # "utilitiescog",
+    # "listenercog",
 ]
 
 tempdir = "/tmp/ollamads/"
@@ -37,19 +37,17 @@ intents = discord.Intents.all()
 # check if the init_settings.json file exists and if not, create it
 if not Path(os.path.join(datadir, "init_settings.json")).exists():
     print("No init_settings.json file found. Creating one now.")
+
     settings_dict_empty = {
         "ollama server": "http://localhost:11434",
         "discord token": "",
         "prefix": "-",
     }
-    # write the dict as json to the init_settings.json file with the json library
+
     with open(os.path.join(datadir, "init_settings.json"), "w") as f:
-        # dump the dict as json to the file with an indent of 4 and support for utf-8
         json.dump(settings_dict_empty, f, indent=4, ensure_ascii=False)
-    # make the user 1000 the owner of the file, so they can edit it
     os.chown(os.path.join(datadir, "init_settings.json"), 1000, 1000)
 
-    # exit the program
     exit(1)
 
 # load the init_settings.json file with the json library
@@ -146,13 +144,13 @@ class ollamads(bridge.Bot):
 # create the bot instance
 print(f"Starting ollamads v {__version__} ...")
 bot = ollamads(prefix, dirname, intents=intents)
-print(f"Loading {len(enabled_ext)} extensions: \n")
+print(f"Loading {len(extensions)} extensions: \n")
 
 # load the cogs aka extensions
-for ext in enabled_ext:
+for ext in extensions:
     try:
         print(f"   loading {ext}")
-        bot.load_extension(ext)
+        bot.load_extension(f'ollamads.cogs.{ext}')
     except Exception as exc:
         print(f"error loading {ext}")
         raise exc
