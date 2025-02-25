@@ -195,10 +195,15 @@ class ChatCommands(commands.Cog):
         ctx = await self.bot.get_context(message)
         message_content = message.content
 
-        image_url = []
+        image_url_list = []
+        image_url = None
+        
         if message.attachments:
             for attachment in message.attachments:
-                image_url.append(attachment.url)
+                image_url_list.append(attachment.url)
+
+        if image_url_list:
+            image_url = image_url_list[0]
 
         if message.reference and message.reference.message_id: 
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
@@ -206,15 +211,16 @@ class ChatCommands(commands.Cog):
             if referenced_message.author != self.bot.user:
                 if referenced_message.attachments:
                     for attachment in referenced_message.attachments:
-                        image_url.append(attachment.url)
+                        image_url_list.append(attachment.url)
 
-            if referenced_message.author == self.bot.user:
-                await self.__llm_chat__(ctx, message_content, image_url[0])
-            elif self.bot.user in message.mentions:
-                await self.__llm_chat__(ctx, message_content, image_url[0])
+            if image_url_list:
+                image_url = image_url_list[0]
+
+            if (referenced_message.author == self.bot.user) or (self.bot.user in message.mentions):
+                await self.__llm_chat__(ctx, message_content, image_url)
 
         elif self.bot.user in message.mentions:
-            await self.__llm_chat__(ctx, message_content, image_url[0])
+            await self.__llm_chat__(ctx, message_content, image_url)
 
 
     async def __image_to_base64__(self, url):
