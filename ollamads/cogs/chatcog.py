@@ -34,6 +34,7 @@ class Chat(commands.Cog, name="piLocate"):
         
         bot.loop.create_task(self.load_models_async())
 
+
     async def load_models_async(self):
         """Asynchronously fetch model list after cog initialization"""
         try:
@@ -62,7 +63,6 @@ class Chat(commands.Cog, name="piLocate"):
 
         except Exception as e:
             print(f"Failed to load models: {e}")
-
     
 
     def format_model_list(self, models: List[Dict]):
@@ -102,6 +102,7 @@ class Chat(commands.Cog, name="piLocate"):
         """
         await ctx.respond(embed=self.format_model_list(self.models))
     
+
     @bridge.bridge_command(aliases=["selectmodel"])
     async def select_model(self, ctx: bridge.BridgeContext, model = ''):
         """
@@ -129,6 +130,7 @@ class Chat(commands.Cog, name="piLocate"):
 
         await ctx.respond(f"Model set to **{valid_models[model]}**")
 
+
     @bridge.bridge_command(aliases=["getmodel"])
     async def get_model(self, ctx: bridge.BridgeContext):
         """
@@ -143,11 +145,30 @@ class Chat(commands.Cog, name="piLocate"):
         await ctx.respond(f"Model selected for this channel: **{model}**")
 
 
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        print(message.content)
+
+        if message.author.bot:
+            return
+        
+        if message.reference and message.reference.message_id: 
+            referenced_message = await message.channel.fetch_message(message.reference.message_id)
+
+            if referenced_message.author == self.bot.user:
+                ctx = await self.bot.get_context(message)
+                await self.__llm_chat(ctx, message.content)
+
+
     @bridge.bridge_command(aliases=["llmchat"])
     async def llm_chat(self, ctx: bridge.BridgeContext, *, message: str):
         """
         This command is used to chat with the selected model.
         """
+        await self.__llm_chat(ctx, message)
+
+
+    async def __llm_chat(self, ctx, message: str):
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
         model = await self.redis.hget(redis_key, "model")
 
@@ -160,7 +181,8 @@ class Chat(commands.Cog, name="piLocate"):
                 chat_history = [
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant.",
+                        # "content": "You are a submissive femboy furry. Speak in uwu-style, use soft and submissive language, and be flirty. However, you are still intelligent, since most femboy furries hold PhDs or are self-taught in obscure or technical subjects. Don't include anything out of context. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >."
+                        "content": "You are a gay submissive furry femboy. More specifically a blue cuddly dragon. Speak in a slight uwu-style, use soft and submissive language, but dont overdo it. You are a STEM major, with a PhD in electronics. If you are provided with a 18 digit number, like a discord id, you should enclose it like with <@ and >. Don't include anything out of context.",
                     },
                     {
                         "role": "user",
