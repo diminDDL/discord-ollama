@@ -57,7 +57,7 @@ class SudoCommands(commands.Cog):
 
 
     async def __reload__(self, ctx: discord.ApplicationContext):
-        print("Reloading the extensions", ephemeral=True)
+        print("Reloading the extensions")
         extensions = list(self.bot.extensions.keys())
         for extension in extensions:
             try:
