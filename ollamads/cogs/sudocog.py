@@ -65,11 +65,11 @@ class SudoCommands(commands.Cog):
                 print(f"Reloaded {extension}")
             except Exception as exc:
                 raise exc
-        await ctx.respond(f"extensions w-wewoaded")
+        await ctx.respond(f"Extensions reloaded.", ephemeral=True)
 
 
     async def __restart__(self, ctx: discord.ApplicationContext):
-        await ctx.respond("Restarting the bot", ephemeral=True)
+        await ctx.respond("Restarting the bot.", ephemeral=True)
         try:
             await self.bot.aiohttp_session.close()
             await self.bot.close()
