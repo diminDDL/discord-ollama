@@ -293,6 +293,10 @@ class ChatCommands(commands.Cog):
                 # Extract response message from assistant
                 if hasattr(response, "message") and hasattr(response.message, "content"):
                     assistant_reply = response.message.content
+
+                    # remove the stuff inside the <think> tag for reasoning models
+                    assistant_reply = assistant_reply.split("</think>")[-1]
+
                     # limit response to 2000 characters
                     if len(assistant_reply) > 2000:
                         assistant_reply = assistant_reply[:2000]
