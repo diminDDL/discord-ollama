@@ -27,6 +27,10 @@ class ChatAdminCommandsEnum(IntEnum):
     set = 2
     get = 3
     prompt = 4
+    bot2bot = 5
+    clear = 6
+    status = 7
+    history = 8
 
 
 class ChatUserCommandsEnum(IntEnum):
@@ -53,7 +57,7 @@ class ChatCommands(commands.Cog):
 
     @commands.guild_only()
     @commands.slash_command(name="config")
-    async def chat_admin_cmd(self, ctx: discord.ApplicationContext, command: ChatAdminCommandsEnum, model: str = ""):
+    async def chat_admin_cmd(self, ctx: discord.ApplicationContext, command: ChatAdminCommandsEnum, argument: str = ""):
         """
         This command is used to manage the chat settings for the bot.
         """
@@ -62,11 +66,19 @@ class ChatCommands(commands.Cog):
         elif command == ChatAdminCommandsEnum.list:
             await self.__list__(ctx)
         elif command == ChatAdminCommandsEnum.set:
-            await self.__set__(ctx, model)
+            await self.__set__(ctx, argument)
         elif command == ChatAdminCommandsEnum.get:
             await self.__get__(ctx)
         elif command == ChatAdminCommandsEnum.prompt:
-            await self.__prompt__(ctx, model)
+            await self.__prompt__(ctx, argument)
+        elif command == ChatAdminCommandsEnum.bot2bot:
+            await self.__bot2bot__(ctx)
+        elif command == ChatAdminCommandsEnum.clear:
+            await self.__admin_clear__(ctx)
+        elif command == ChatAdminCommandsEnum.status:
+            await self.__status__(ctx)
+        elif command == ChatAdminCommandsEnum.history:
+            await self.__history__(ctx, argument)
         else:
             await ctx.respond("Invalid command.")
 
@@ -97,15 +109,15 @@ class ChatCommands(commands.Cog):
         """
         This command is used to list the available models.
         """
-        await ctx.respond(embed=self.__format_model_list__(self.models))
+        await ctx.respond(embed=self.__format_model_list__(self.models), ephemeral=True)
     
 
     async def __set__(self, ctx: discord.ApplicationContext, model = ''):
         """
-        This command is used to select a model for a specific channel.
+        This command is used to select a model for a specific channel. Requires model name.
         """
         if not model:
-            return await ctx.respond("Please provide a model name.")
+            return await ctx.respond("Please provide a model name.", ephemeral=True)
 
         model = model.lower().strip()
 
@@ -140,15 +152,6 @@ class ChatCommands(commands.Cog):
         await ctx.respond(f"Model selected for this channel: **{model}**")
 
 
-    async def __chat__(self, ctx: discord.ApplicationContext, message: str):
-        """
-        This command is used to chat with the selected model.
-        """
-        chat_history = await self.__llm_format_history__(ctx, message)
-        await self.__llm_chat__(ctx, chat_history)
-        await ctx.respond("Message sent.", ephemeral=True)
-        
-
     async def __prompt__(self, ctx: discord.ApplicationContext, message: str = ""):
         """
         Get or Set the system prompt for the model, for this specific channel.
@@ -169,6 +172,142 @@ class ChatCommands(commands.Cog):
             await ctx.respond(f"Prompt set to: ```{message}```")
 
 
+    async def __bot2bot__(self, ctx: discord.ApplicationContext):
+        """
+        This command is used to enable or disable bot-to-bot communication.
+        """
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        bot2bot = await self.redis.hget(redis_key, "bot2bot")
+        
+        if bot2bot == "True":
+            bot2bot = "False"
+        else:
+            bot2bot = "True"
+
+        await self.redis.hset(redis_key, "bot2bot", bot2bot)
+        await ctx.respond(f"Bot2Bot communication is now {'enabled' if bot2bot == "True" else 'disabled'}.")
+
+
+    async def __admin_clear__(self, ctx: discord.ApplicationContext):
+        """
+        Clear the chat history for this channel.
+        """
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:*:history"
+        keys = []
+        async for key in self.redis.scan_iter(redis_key):
+            keys.append(key)
+
+        for key in keys:
+            await self.redis.hdel(key, "chat_history")
+
+        await ctx.respond("The entire chat history is cleared for this channel.")
+
+
+    async def __status__(self, ctx: discord.ApplicationContext):
+        """
+        Get the status of the bot.
+        """
+        
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        model = await self.redis.hget(redis_key, "model")
+        bot2bot = await self.redis.hget(redis_key, "bot2bot")
+        
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:*:history"
+        keys = {}
+        async for key in self.redis.scan_iter(redis_key):
+            user_id = int(key.split(":")[5])
+            keys[user_id] = key
+            
+        # get the length of the chat history from each user
+        chat_history = {}
+        for user_id, key in keys.items():
+            chat_history[user_id] = await self.redis.hget(key, "chat_history")
+            if chat_history[user_id]:
+                chat_history[user_id] = json.loads(chat_history[user_id])
+            else:
+                chat_history[user_id] = None
+
+        # build the chat history
+        history = ""
+        for user_id, user_history in chat_history.items():
+            length = len(user_history) if user_history else 0
+            # hide the system prompt
+            if length > 0:
+                length - 1
+            history += f"<@{user_id}> has {len(user_history)} entries (max 9)\n"
+                
+        # build an embed
+        embed = discord.Embed(
+            title="Bot Status",
+            color=discord.Color.blurple(),
+            timestamp=datetime.now()
+        )
+
+        embed.add_field(
+            name="Model",
+            value=model if model else "Not set",
+            inline=False
+        )
+
+        embed.add_field(
+            name="Bot2Bot",
+            value=bot2bot if bot2bot else "Not set",
+            inline=False
+        )
+
+        embed.add_field(
+            name="Chat History",
+            value=history if history else "No chat history yet!",
+            inline=False
+        )
+
+        await ctx.respond(embed=embed)
+
+
+    async def __history__(self, ctx: discord.ApplicationContext, user: str):
+        """
+        Get the chat history for a specific user. Requires user ID.
+        """
+        if not user:
+            return await ctx.respond("Please provide a user ID.", ephemeral=True)
+        
+        # try to get the id from a mention
+        if user and user.startswith("<@") and user.endswith(">"):
+            user = user[2:-1]
+
+        try:
+            user = int(user)
+        except ValueError:
+            return await ctx.respond("Invalid user ID.", ephemeral=True)
+
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:{user}:history"
+        chat_history = await self.redis.hget(redis_key, "chat_history")
+
+        if not chat_history:
+            return await ctx.respond("No chat history found for this user.", ephemeral=True)
+
+        chat_history = json.loads(chat_history)
+        # remove the first entry which is the system prompt
+        chat_history.pop(0)
+        chat_history = json.dumps(chat_history, indent=4)
+
+        # create a temporary file to send the chat history
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, newline="\n", suffix=".json") as f:
+            f.write(chat_history)
+            temp_filename = f.name
+
+        await ctx.respond(file=discord.File(temp_filename))
+
+    
+    async def __chat__(self, ctx: discord.ApplicationContext, message: str):
+        """
+        This command is used to chat with the selected model.
+        """
+        chat_history = await self.__llm_format_history__(ctx, message)
+        await self.__llm_chat__(ctx, chat_history)
+        await ctx.respond("Message sent.", ephemeral=True)
+        
+
     async def __clear__(self, ctx: discord.ApplicationContext):
         """
         Clear your chat history for this channel.
@@ -183,16 +322,22 @@ class ChatCommands(commands.Cog):
         """
         Listen for messages and respond to mentions.
         """
+        ctx = await self.bot.get_context(message)
+
         if not message.guild:
             return
+        
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        allow_bots = await self.redis.hget(redis_key, "bot2bot")
 
-        if message.author.bot:
+        if message.author.bot and (allow_bots == "False"):
+            return
+        elif message.author == self.bot.user:
             return
         
         if message.content == "":
             return
         
-        ctx = await self.bot.get_context(message)
         message_content = message.content
 
         image_url_list = []
@@ -293,9 +438,6 @@ class ChatCommands(commands.Cog):
                 # Extract response message from assistant
                 if hasattr(response, "message") and hasattr(response.message, "content"):
                     assistant_reply = response.message.content
-                    # limit response to 2000 characters
-                    if len(assistant_reply) > 2000:
-                        assistant_reply = assistant_reply[:2000]
 
                     # Add response to chat history
                     chat_history.append(
@@ -304,13 +446,16 @@ class ChatCommands(commands.Cog):
                             "content": assistant_reply,
                         }
                     )
+                    
+                    # divide the response into 2 000 character blocks
+                    assistant_reply = [assistant_reply[i:i + 2000] for i in range(0, len(assistant_reply), 2000)]
 
                     # Clear the oldest entry if chat history is longer than 10 entries
-                    if len(chat_history) > 10:
+                    if len(chat_history) > 20:
                         chat_history.pop(1)
-                        chat_history.pop(2)
+                        chat_history.pop(1)
                 else:
-                    assistant_reply = "Sorry, I couldn't generate a response."
+                    await ctx.respond("Sorry, I couldn't generate a response.")
 
                     # Remove the last user message if the assistant failed to respond
                     chat_history.pop(-1)
@@ -318,7 +463,8 @@ class ChatCommands(commands.Cog):
                 # Save chat history to redis
                 await self.redis.hset(redis_key_history, "chat_history", json.dumps(chat_history))
 
-                await ctx.respond(assistant_reply)
+                for reply in assistant_reply:
+                    await ctx.respond(reply)
 
         except Exception as e:
             await ctx.respond(f"Error occurred: {e}")
