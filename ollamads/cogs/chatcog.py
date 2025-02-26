@@ -715,6 +715,7 @@ class ChatCommands(commands.Cog):
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
 
             if referenced_message.author != self.bot.user:
+                message_content = "\"" + referenced_message.content + "\"\n" + message_content
                 if referenced_message.attachments:
                     for attachment in referenced_message.attachments:
                         image_url_list.append(attachment.url)
