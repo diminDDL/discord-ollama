@@ -132,12 +132,17 @@ class ollamads(bridge.Bot):
 
         # try to load the guild_mode and listed_guilds from the redis database
         try:
-            self.guilds_mode = bool(self.redis.get("guilds_mode"))
-            self.listed_guilds = self.redis.smembers("listed_guilds")
-            self.guild_lists = self.redis.hgetall("guild_lists")
+            self.loop.run_until_complete(self.fetch_redis())
         except redis.exceptions.ConnectionError:
             print("Redis connection failed. Check if redis is running.")
             exit(1)
+
+
+    async def fetch_redis(self):
+        self.guilds_mode = bool(await self.redis.get("guilds_mode"))
+        self.listed_guilds = await self.redis.smembers("listed_guilds")
+        self.guild_lists = await self.redis.hgetall("guild_lists")
+
 
     async def aiohttp_start(self):
         self.aiohttp_session = aiohttp.ClientSession()
