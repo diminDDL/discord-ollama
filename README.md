@@ -4,10 +4,10 @@
 A bot to connect to an ollama instance and expose it to discord users. The bot is written in Python and can be run anywhere with a docker container (the instructions on how to do so are below) or you can add the version I host for myself and use that (link below).
 
 The bot has the following features:
-- [ ] Whitelist for users/channels that can use the bot
-- [ ] Retain channel context in an internal cache
-- [ ] Commands for changing the model/settings on a per channel basis
-- [ ] Show status and loaded model into the ollama instance
+- [x] Whitelist for users/channels that can use the bot
+- [x] Retain channel context in an internal cache
+- [x] Commands for changing the model/settings on a per channel basis
+- [x] Show status and loaded model into the ollama instance
 - [ ] Help command 
 
 Fell free to contact me on Discord [diminddl](https://discordapp.com/users/312591385624576001) if you have any questions.
