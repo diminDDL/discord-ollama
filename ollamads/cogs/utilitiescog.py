@@ -35,8 +35,8 @@ class UtilityCommands(commands.Cog, name="utility commands"):
         match(command):
             case UtilityCommandsEnum.status:
                 await self.__status__(ctx)
-            case UtilityCommandsEnum.invite:
-                await self.__invite__(ctx)
+            # case UtilityCommandsEnum.invite:
+            #     await self.__invite__(ctx)
             case UtilityCommandsEnum.about:
                 await self.__about__(ctx)
             case _:
