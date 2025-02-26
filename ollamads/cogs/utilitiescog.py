@@ -8,7 +8,6 @@ import psutil
 import si_prefix
 from discord.ext import commands, bridge
 from datetime import datetime
-from ollamads.backend.util import EmbedColors as ec
 from enum import IntEnum
 
 
@@ -35,8 +34,8 @@ class UtilityCommands(commands.Cog, name="utility commands"):
         match(command):
             case UtilityCommandsEnum.status:
                 await self.__status__(ctx)
-            case UtilityCommandsEnum.invite:
-                await self.__invite__(ctx)
+            # case UtilityCommandsEnum.invite:
+            #     await self.__invite__(ctx)
             case UtilityCommandsEnum.about:
                 await self.__about__(ctx)
             case _:
@@ -101,7 +100,7 @@ class UtilityCommands(commands.Cog, name="utility commands"):
         This command is here to show you what the bot is made of.
         """
         embed = discord.Embed(
-            color=ec.raspberry_red,
+            color=0x9b0f0f,
             title="About ollamads",
             description="""A bot that allows you to connect an ollama instance to discord for LLM fun within discord.
                   This bot is licensed under the MIT license is open source and free to use for everyone.

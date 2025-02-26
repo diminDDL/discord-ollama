@@ -41,6 +41,7 @@ if not Path(os.path.join(datadir, "init_settings.json")).exists():
         "ollama server": "http://host.docker.internal:11434",
         "discord token": "",
         "default prompt": "What do you want to say?",
+        "vetted users": [],
     }
 
     with open(os.path.join(datadir, "init_settings.json"), "w") as f:
@@ -57,6 +58,7 @@ with open(os.path.join(datadir, "init_settings.json"), "r") as f:
         ollama_server_url = settings_dict["ollama server"]
         discord_token = settings_dict["discord token"]
         default_prompt = settings_dict["default prompt"]
+        vetted_users = [int(user) for user in settings_dict["vetted users"]]
 
     except json.decoder.JSONDecodeError:
         print("init_settings.json is not valid json. Please fix it.")
@@ -70,6 +72,7 @@ class ollamads(bridge.Bot):
         # ---static values---
         self.ollama_server = ollama_server_url
         self.default_prompt = default_prompt
+        self.vetted_users = vetted_users
         # paths
         self.dirname = dirname
         self.datadir = "/app/data/"
@@ -129,12 +132,17 @@ class ollamads(bridge.Bot):
 
         # try to load the guild_mode and listed_guilds from the redis database
         try:
-            self.guilds_mode = bool(self.redis.get("guilds_mode"))
-            self.listed_guilds = self.redis.smembers("listed_guilds")
-            self.guild_lists = self.redis.hgetall("guild_lists")
+            self.loop.run_until_complete(self.fetch_redis())
         except redis.exceptions.ConnectionError:
             print("Redis connection failed. Check if redis is running.")
             exit(1)
+
+
+    async def fetch_redis(self):
+        self.guilds_mode = bool(await self.redis.get("guilds_mode"))
+        self.listed_guilds = await self.redis.smembers("listed_guilds")
+        self.guild_lists = await self.redis.hgetall("guild_lists")
+
 
     async def aiohttp_start(self):
         self.aiohttp_session = aiohttp.ClientSession()
