@@ -46,6 +46,7 @@ class ChatCommands(commands.Cog):
     def __init__(self, bot):
         self.bot: commands.Bot = bot
         self.default_prompt = self.bot.default_prompt
+        self.vetted_users = self.bot.vetted_users
         self.redis = self.bot.redis
         self.ollama = self.bot.ollama
         self.pp = ProcessPoolExecutor(max_workers=1)    
@@ -61,6 +62,9 @@ class ChatCommands(commands.Cog):
         """
         This command is used to manage the chat settings for the bot.
         """
+        if ctx.author.id not in self.vetted_users:
+            return await ctx.respond("You are not authorized to use this command.", ephemeral=True)
+
         if command == ChatAdminCommandsEnum.reload:
             await self.__reload__(ctx)
         elif command == ChatAdminCommandsEnum.list:
