@@ -716,7 +716,8 @@ class ChatCommands(commands.Cog):
 
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
             # Suggested by https://github.com/R2Boyo25
-            message_content = "> " + referenced_message.content.strip().replace("\n", "\n> ")
+            message_content = "\"" + referenced_message.content + "\"\n" + message_content
+            # message_content = "> " + referenced_message.content.strip().replace("\n", "\n> ")
 
             if referenced_message.author != self.bot.user:
                 if referenced_message.attachments:
@@ -759,8 +760,10 @@ class ChatCommands(commands.Cog):
 
     async def __process_pil__(self, image):
         if image.format == "GIF":
-            if image.is_animated:
-                frame_index = len(image.frames) // 2 if len(image.frames) > 1 else 0
+            if hasattr(image, 'is_animated') and image.is_animated:
+                frame_index = 0
+                if hasattr(image, 'n_frames') and image.n_frames > 1:
+                    frame_index = image.n_frames // 2
                 image.seek(frame_index)
             image = image.convert("RGBA")
         
