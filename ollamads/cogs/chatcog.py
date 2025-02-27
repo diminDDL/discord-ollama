@@ -17,6 +17,7 @@ from discord.ext import commands
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ProcessPoolExecutor
 from ollama import AsyncClient
+from PIL import Image
 
 
 class ChatAdminCommandsEnum(IntEnum):
@@ -84,7 +85,8 @@ class ChatCommands(commands.Cog):
         self.ollama = self.bot.ollama
         self.pp = ProcessPoolExecutor(max_workers=1)    
         self.sep = asyncio.Semaphore(2)
-        self.ll = asyncio.get_event_loop()        
+        self.ll = asyncio.get_event_loop()     
+        self.max_history = 20   
         
         bot.loop.create_task(self.__load_models_async__())
 
@@ -595,7 +597,7 @@ class ChatCommands(commands.Cog):
             # hide the system prompt
             if length > 0:
                 length - 1
-            history += f"<@{user_id}> has {len(user_history)} entries (max 9)\n"
+            history += f"<@{user_id}> has {len(user_history)} entries (max {self.max_history})\n"
                 
         # build an embed
         embed = discord.Embed(
@@ -713,6 +715,9 @@ class ChatCommands(commands.Cog):
                 return
 
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
+            # Suggested by https://github.com/R2Boyo25
+            message_content = "\"" + referenced_message.content + "\"\n" + message_content
+            # message_content = "> " + referenced_message.content.strip().replace("\n", "\n> ")
 
             if referenced_message.author != self.bot.user:
                 if referenced_message.attachments:
@@ -739,6 +744,38 @@ class ChatCommands(commands.Cog):
                     return base64.b64encode(await response.read()).decode("utf-8")
                 
         return None
+    
+
+    async def __image_to_pil__(self, url):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        return Image.open(io.BytesIO(await response.read()))
+        except:
+            return None
+                
+        return None
+    
+
+    async def __process_pil__(self, image):
+        if image.format == "GIF":
+            if hasattr(image, 'is_animated') and image.is_animated:
+                frame_index = 0
+                if hasattr(image, 'n_frames') and image.n_frames > 1:
+                    frame_index = image.n_frames // 2
+                image.seek(frame_index)
+            image = image.convert("RGBA")
+        
+        image.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        
+        # Convert image to a byte stream
+        with io.BytesIO() as img_byte_arr:
+            image.save(img_byte_arr, format="PNG")
+            img_byte_arr.seek(0)
+            img_base64 = base64.b64encode(img_byte_arr.read()).decode('utf-8')
+        
+        return img_base64
 
 
     async def __llm_chat__(self, ctx: discord.ApplicationContext, message: str, image_url: str = None):
@@ -771,7 +808,12 @@ class ChatCommands(commands.Cog):
                 # Fetch image from URL and save to file, if provided
                 image_base64 = []
                 if image_url:
-                    image_base64.append(await self.__image_to_base64__(image_url))
+                    # image_base64.append(await self.__image_to_base64__(image_url))
+                    img = await self.__image_to_pil__(image_url)
+                    if img:
+                        image_base64.append(await self.__process_pil__(img))
+                    else:
+                        image_base64 = None
                 else:
                     image_base64 = None
 
@@ -803,7 +845,7 @@ class ChatCommands(commands.Cog):
                 if hasattr(response, "message") and hasattr(response.message, "content"):
                     assistant_reply = response.message.content
 
-                    # remove the stuff inside the <think> tag for reasoning models
+                    # remove the stuit ff inside the <think> tag for reasoning models
                     assistant_reply = assistant_reply.split("</think>")[-1]
 
                     # Add response to chat history
@@ -813,12 +855,15 @@ class ChatCommands(commands.Cog):
                             "content": assistant_reply,
                         }
                     )
+
+                    # remove any mention of 265651045911232512
+                    assistant_reply = assistant_reply.replace("<@265651045911232512>", "[REDACTED]").replace("<@!265651045911232512>", "[REDACTED]").replace("@dragon_enjoyer", "[REDACTED]").replace("@Derg", "[REDACTED]")
                     
                     # divide the response into 2 000 character blocks
                     assistant_reply = [assistant_reply[i:i + 2000] for i in range(0, len(assistant_reply), 2000)]
 
                     # Clear the oldest entry if chat history is longer than 10 entries
-                    if len(chat_history) > 20:
+                    if len(chat_history) > self.max_history:
                         chat_history.pop(1)
                         chat_history.pop(1)
                 else:
