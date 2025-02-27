@@ -84,7 +84,8 @@ class ChatCommands(commands.Cog):
         self.ollama = self.bot.ollama
         self.pp = ProcessPoolExecutor(max_workers=1)    
         self.sep = asyncio.Semaphore(2)
-        self.ll = asyncio.get_event_loop()        
+        self.ll = asyncio.get_event_loop()     
+        self.max_history = 20   
         
         bot.loop.create_task(self.__load_models_async__())
 
@@ -595,7 +596,7 @@ class ChatCommands(commands.Cog):
             # hide the system prompt
             if length > 0:
                 length - 1
-            history += f"<@{user_id}> has {len(user_history)} entries (max 9)\n"
+            history += f"<@{user_id}> has {len(user_history)} entries (max {self.max_history})\n"
                 
         # build an embed
         embed = discord.Embed(
@@ -713,9 +714,10 @@ class ChatCommands(commands.Cog):
                 return
 
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
+            # Suggested by https://github.com/R2Boyo25
+            message_content = "> " + referenced_message.content.strip().replace("\n", "\n> ")
 
             if referenced_message.author != self.bot.user:
-                message_content = "\"" + referenced_message.content + "\"\n" + message_content
                 if referenced_message.attachments:
                     for attachment in referenced_message.attachments:
                         image_url_list.append(attachment.url)
@@ -804,7 +806,7 @@ class ChatCommands(commands.Cog):
                 if hasattr(response, "message") and hasattr(response.message, "content"):
                     assistant_reply = response.message.content
 
-                    # remove the stuff inside the <think> tag for reasoning models
+                    # remove the stuit ff inside the <think> tag for reasoning models
                     assistant_reply = assistant_reply.split("</think>")[-1]
 
                     # Add response to chat history
@@ -819,7 +821,7 @@ class ChatCommands(commands.Cog):
                     assistant_reply = [assistant_reply[i:i + 2000] for i in range(0, len(assistant_reply), 2000)]
 
                     # Clear the oldest entry if chat history is longer than 10 entries
-                    if len(chat_history) > 20:
+                    if len(chat_history) > self.max_history:
                         chat_history.pop(1)
                         chat_history.pop(1)
                 else:
