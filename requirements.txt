@@ -4,3 +4,4 @@ psutil
 setuptools
 si-prefix
 ollama
+Pillow
