@@ -17,6 +17,7 @@ from discord.ext import commands
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ProcessPoolExecutor
 from ollama import AsyncClient
+from PIL import Image
 
 
 class ChatAdminCommandsEnum(IntEnum):
@@ -742,6 +743,36 @@ class ChatCommands(commands.Cog):
                     return base64.b64encode(await response.read()).decode("utf-8")
                 
         return None
+    
+
+    async def __image_to_pil__(self, url):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        return Image.open(io.BytesIO(await response.read()))
+        except:
+            return None
+                
+        return None
+    
+
+    async def __process_pil__(self, image):
+        if image.format == "GIF":
+            if image.is_animated:
+                frame_index = len(image.frames) // 2 if len(image.frames) > 1 else 0
+                image.seek(frame_index)
+            image = image.convert("RGBA")
+        
+        image.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        
+        # Convert image to a byte stream
+        with io.BytesIO() as img_byte_arr:
+            image.save(img_byte_arr, format="PNG")
+            img_byte_arr.seek(0)
+            img_base64 = base64.b64encode(img_byte_arr.read()).decode('utf-8')
+        
+        return img_base64
 
 
     async def __llm_chat__(self, ctx: discord.ApplicationContext, message: str, image_url: str = None):
@@ -774,7 +805,12 @@ class ChatCommands(commands.Cog):
                 # Fetch image from URL and save to file, if provided
                 image_base64 = []
                 if image_url:
-                    image_base64.append(await self.__image_to_base64__(image_url))
+                    # image_base64.append(await self.__image_to_base64__(image_url))
+                    img = await self.__image_to_pil__(image_url)
+                    if img:
+                        image_base64.append(await self.__process_pil__(img))
+                    else:
+                        image_base64 = None
                 else:
                     image_base64 = None
 
@@ -816,6 +852,9 @@ class ChatCommands(commands.Cog):
                             "content": assistant_reply,
                         }
                     )
+
+                    # remove any mention of 265651045911232512
+                    assistant_reply = assistant_reply.replace("<@265651045911232512>", "[REDACTED]").replace("<@!265651045911232512>", "[REDACTED]").replace("@dragon_enjoyer", "[REDACTED]").replace("@Derg", "[REDACTED]")
                     
                     # divide the response into 2 000 character blocks
                     assistant_reply = [assistant_reply[i:i + 2000] for i in range(0, len(assistant_reply), 2000)]
