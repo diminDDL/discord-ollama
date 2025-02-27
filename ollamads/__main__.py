@@ -40,7 +40,8 @@ if not Path(os.path.join(datadir, "init_settings.json")).exists():
     settings_dict_empty = {
         "ollama server": "http://host.docker.internal:11434",
         "discord token": "",
-        "default prompt": "What do you want to say?",
+        "default prompt": "You are a helpful dude, perform whatever the user wants.",
+        "default vision prompt": "You will be provided an image from a user, your task is to describe what is in the image. Read all the text in the image, and describe all objects and their locations in your response.",
         "vetted users": [],
     }
 
@@ -58,6 +59,7 @@ with open(os.path.join(datadir, "init_settings.json"), "r") as f:
         ollama_server_url = settings_dict["ollama server"]
         discord_token = settings_dict["discord token"]
         default_prompt = settings_dict["default prompt"]
+        default_vision_prompt = settings_dict["default vision prompt"]
         vetted_users = [int(user) for user in settings_dict["vetted users"]]
 
     except json.decoder.JSONDecodeError:
@@ -73,6 +75,7 @@ class ollamads(bridge.Bot):
         self.ollama_server = ollama_server_url
         self.default_prompt = default_prompt
         self.vetted_users = vetted_users
+        self.default_vision_prompt = default_vision_prompt
         # paths
         self.dirname = dirname
         self.datadir = "/app/data/"

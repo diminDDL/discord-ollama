@@ -36,13 +36,15 @@ class ChatConfigCommandsEnum(IntEnum):
     reload = 0
     list = 1
     set = 2
-    get = 3
-    prompt = 4
-    bot2bot = 5
-    clear = 6
-    status = 7
-    whitelist = 8
-    whitelist_ls = 9
+    set_vision_fallback = 3
+    get = 4
+    prompt = 5
+    vision_prompt = 6
+    bot2bot = 7
+    clear = 8
+    status = 9
+    whitelist = 10
+    whitelist_ls = 11
 
 
 class ChatUserCommandsEnum(IntEnum):
@@ -79,6 +81,7 @@ class ChatCommands(commands.Cog):
     def __init__(self, bot):
         self.bot: commands.Bot = bot
         self.default_prompt = self.bot.default_prompt
+        self.default_vision_prompt = self.bot.default_vision_prompt
         self.vetted_users = self.bot.vetted_users
         self.redis = self.bot.redis
         self.ollama = self.bot.ollama
@@ -135,10 +138,14 @@ class ChatCommands(commands.Cog):
                 await self.__list__(ctx)
             case ChatConfigCommandsEnum.set:
                 await self.__set__(ctx, argument)
+            case ChatConfigCommandsEnum.set_vision_fallback:
+                await self.__set__fallback__vision__(ctx, argument)
             case ChatConfigCommandsEnum.get:
                 await self.__get__(ctx)
             case ChatConfigCommandsEnum.prompt:
                 await self.__prompt__(ctx, argument)
+            case ChatConfigCommandsEnum.vision_prompt:
+                await self.__vision_prompt__(ctx, argument)
             case ChatConfigCommandsEnum.bot2bot:
                 await self.__bot2bot__(ctx)
             case ChatConfigCommandsEnum.clear:
@@ -472,6 +479,17 @@ class ChatCommands(commands.Cog):
         """
         await ctx.respond(embed=self.__format_model_list__(self.models), ephemeral=True)
     
+    async def __get_model_info__(self, model_name):
+        """
+        Get full model information via a direct request to the ollama API.
+        """
+        url = f"{self.bot.ollama_server}/api/show"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json={"name": model_name}) as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+                return data
 
     async def __set__(self, ctx: discord.ApplicationContext, model = ''):
         """
@@ -482,22 +500,25 @@ class ChatCommands(commands.Cog):
 
         model = model.lower().strip()
 
-        # Ensure `self.models` is populated before checking
         if not self.models:
-            return await ctx.respond("No models are available at the moment. Please try again later.")
+            return await ctx.respond("No models are available at the moment. Please try again later.", ephermeral=True)
 
-        valid_models = {m["model"].lower(): m["model"] for m in self.models}  # Preserve original names
+        valid_models = {m["model"].lower(): m["model"] for m in self.models}
 
         if model not in valid_models:
             return await ctx.respond(
-                f"Invalid model name. Available models: {', '.join(valid_models.values())}"
+                f"Invalid model name. Available models: {', '.join(valid_models.values())}",
+                ephemeral=True
             )
 
-        # Improved Redis key structure
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
         await self.redis.hset(redis_key, "model", valid_models[model])
 
-        await ctx.respond(f"Model set to **{valid_models[model]}**")
+        info = await self.__get_model_info__(valid_models[model])
+        is_vision = any("vision" in str(key) or (isinstance(value, dict) and any("vision" in str(k) for k in value.keys())) for key, value in info.items())
+        await self.redis.hset(redis_key, "vision", str(is_vision))
+
+        await ctx.respond(f"Model set to **{valid_models[model]}**, vision capable: {is_vision}.")
 
 
     async def __get__(self, ctx: discord.ApplicationContext):
@@ -510,7 +531,34 @@ class ChatCommands(commands.Cog):
         if not model:
             return await ctx.respond("No model selected for this channel.")
 
-        await ctx.respond(f"Model selected for this channel: **{model}**")
+        await ctx.respond(f"Model selected for this channel: **{model}**, vision capable: {await self.redis.hget(redis_key, 'vision')}.")
+
+    async def __set__fallback__vision__(self, ctx: discord.ApplicationContext, model = ''):
+        """
+        Configure a fallback model for vision capabilities, in case the primary model is not vision capable.
+        """
+        redis_key_settings = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+
+        if model == "" or not model or model.lower() == "none":
+            await self.redis.hdel(redis_key_settings, "vision_fallback")
+            return await ctx.respond("Vision fallback model disabled.")
+        else:
+            model = model.lower().strip()
+
+            if not self.models:
+                return await ctx.respond("No models are available at the moment. Please try again later.", ephemeral=True)
+            
+            valid_models = {m["model"].lower(): m["model"] for m in self.models}
+
+            if model not in valid_models:
+                return await ctx.respond(
+                    f"Invalid model name. Available models: {', '.join(valid_models.values())}",
+                    ephemeral=True
+                )
+        
+            await self.redis.hset(redis_key_settings, "vision_fallback", valid_models[model])
+
+            await ctx.respond(f"Vision fallback model set to **{valid_models[model]}**.")
 
 
     async def __prompt__(self, ctx: discord.ApplicationContext, message: str = ""):
@@ -532,6 +580,25 @@ class ChatCommands(commands.Cog):
             await self.redis.hset(redis_key, "prompt", message)
             await ctx.respond(f"Prompt set to: ```{message}```")
 
+    async def __vision_prompt__(self, ctx: discord.ApplicationContext, message: str = ""):
+        """
+        Get or set the system prompt for the vision model, for this specific channel.
+        """
+        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        
+        if message is None or message == "":
+
+            prompt = await self.redis.hget(redis_key, "vision_prompt")
+
+            if not prompt:
+                prompt = self.default_vision_prompt
+                await self.redis.hset(redis_key, "vision_prompt", prompt)
+
+            await ctx.respond(f"Current vision fallback prompt: ```{prompt}```")
+
+        else:
+            await self.redis.hset(redis_key, "vision_prompt", message)
+            await ctx.respond(f"Vision fallback prompt set to: ```{message}```")
 
     async def __bot2bot__(self, ctx: discord.ApplicationContext):
         """
@@ -571,6 +638,8 @@ class ChatCommands(commands.Cog):
         
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
         model = await self.redis.hget(redis_key, "model")
+        vision = await self.redis.hget(redis_key, "vision")
+        vision_fallback = await self.redis.hget(redis_key, "vision_fallback")
         bot2bot = await self.redis.hget(redis_key, "bot2bot")
         
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:*:history"
@@ -609,6 +678,20 @@ class ChatCommands(commands.Cog):
             value=model if model else "Not set",
             inline=False
         )
+
+        if vision:
+            embed.add_field(
+                name="Vision Capable",
+                value="Enabled" if vision == "True" else "False",
+                inline=False
+            )
+
+        if vision == "False":
+            embed.add_field(
+                name="Vision Fallback",
+                value=vision_fallback if vision_fallback else "Disabled",
+                inline=False
+            )
 
         embed.add_field(
             name="Bot2Bot",
@@ -741,22 +824,77 @@ class ChatCommands(commands.Cog):
         return None
 
 
+    async def __get_image_context__(self, image_url: str = None, prompt: str = None, model: str = None) -> str:
+        """
+        Get the image context from the vision model.
+        """
+        if not image_url:
+            return None
+
+        if not model:
+            return None
+
+        if not prompt:
+            prompt = self.default_vision_prompt
+
+        image_base64 = []
+        image_base64.append(await self.__image_to_base64__(image_url))
+
+        chat = [
+            {
+                "role": "system",
+                "content": prompt,
+            }
+        ]   
+
+        if image_base64:
+            chat[-1]["images"] = image_base64
+
+        response = await self.ollama.chat(model=model, messages=chat, stream=False)
+
+        if hasattr(response, "message") and hasattr(response.message, "content"):
+            assistant_reply = response.message.content
+            # remove the stuff inside the <think> tag for reasoning models
+            assistant_reply = assistant_reply.split("</think>")[-1]
+
+            return assistant_reply
+
+        else:
+            return None
+
+
+
     async def __llm_chat__(self, ctx: discord.ApplicationContext, message: str, image_url: str = None):
         """
         Chat with the selected model using an image.
         """
-        redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
+        redis_key_settings = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
         redis_key_history = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:user:{ctx.author.id}:history"
-        model = await self.redis.hget(redis_key, "model")
+        model = await self.redis.hget(redis_key_settings, "model")
+        is_vision = await self.redis.hget(redis_key_settings, "vision")
+        vision_model = None
+        vision_prompt = None
+
+        if is_vision == "False":
+            vision_model = await self.redis.hget(redis_key_settings, "vision_fallback")
+            if not vision_model:
+                vision_model = None
+            else:
+                vision_prompt = await self.redis.hget(redis_key_settings, "vision_prompt")
+                if not vision_prompt:
+                    vision_prompt = self.default_vision_prompt
 
         if not model:
             return await ctx.respond("No model selected for this channel.")
         
-        prompt = await self.redis.hget(redis_key, "prompt")
+        prompt = await self.redis.hget(redis_key_settings, "prompt")
 
         if not prompt:
             prompt = self.default_prompt
-            await self.redis.hset(redis_key, "prompt", prompt)
+            await self.redis.hset(redis_key_settings, "prompt", prompt)
+
+        
+
 
         try:
             async with ctx.typing():
@@ -770,10 +908,18 @@ class ChatCommands(commands.Cog):
 
                 # Fetch image from URL and save to file, if provided
                 image_base64 = []
+                image_context = None
                 if image_url:
-                    image_base64.append(await self.__image_to_base64__(image_url))
+                    if is_vision == "False":
+                        image_context = await self.__get_image_context__(image_url, vision_prompt, vision_model)
+                    else:
+                        image_base64.append(await self.__image_to_base64__(image_url))
                 else:
                     image_base64 = None
+
+                if image_context:
+                    # insert the image context at the start of the message
+                    message = f"Image context: {image_context}\n User message: {message}"
 
                 if chat_history is None:
                     chat_history = [
