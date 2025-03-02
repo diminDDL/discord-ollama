@@ -481,6 +481,7 @@ class ChatCommands(commands.Cog):
         """
         await ctx.respond(embed=self.__format_model_list__(self.models), ephemeral=True)
     
+
     async def __get_model_info__(self, model_name):
         """
         Get full model information via a direct request to the ollama API.
@@ -492,6 +493,7 @@ class ChatCommands(commands.Cog):
                     return None
                 data = await response.json()
                 return data
+
 
     async def __set__(self, ctx: discord.ApplicationContext, model = ''):
         """
@@ -534,6 +536,7 @@ class ChatCommands(commands.Cog):
             return await ctx.respond("No model selected for this channel.")
 
         await ctx.respond(f"Model selected for this channel: **{model}**, vision capable: {await self.redis.hget(redis_key, 'vision')}.")
+
 
     async def __set__fallback__vision__(self, ctx: discord.ApplicationContext, model = ''):
         """
@@ -582,6 +585,7 @@ class ChatCommands(commands.Cog):
             await self.redis.hset(redis_key, "prompt", message)
             await ctx.respond(f"Prompt set to: ```{message}```")
 
+
     async def __vision_prompt__(self, ctx: discord.ApplicationContext, message: str = ""):
         """
         Get or set the system prompt for the vision model, for this specific channel.
@@ -601,6 +605,7 @@ class ChatCommands(commands.Cog):
         else:
             await self.redis.hset(redis_key, "vision_prompt", message)
             await ctx.respond(f"Vision fallback prompt set to: ```{message}```")
+
 
     async def __bot2bot__(self, ctx: discord.ApplicationContext):
         """
@@ -802,10 +807,16 @@ class ChatCommands(commands.Cog):
             message_content = "\"" + referenced_message.content + "\"\n" + message_content
             # message_content = "> " + referenced_message.content.strip().replace("\n", "\n> ")
 
-            if referenced_message.author != self.bot.user:
-                if referenced_message.attachments:
-                    for attachment in referenced_message.attachments:
-                        image_url_list.append(attachment.url)
+            if referenced_message.attachments:
+                for attachment in referenced_message.attachments:
+                    image_url_list.append(attachment.url)
+                    
+            if referenced_message.embeds:
+                for embed in referenced_message.embeds:
+                    if embed.image:
+                        image_url_list.append(embed.image.url)
+                    if embed.thumbnail:
+                        image_url_list.append(embed.thumbnail.url)
 
             if image_url_list:
                 image_url = image_url_list[0]
@@ -850,7 +861,7 @@ class ChatCommands(commands.Cog):
                 image.seek(frame_index)
             image = image.convert("RGBA")
         
-        image.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        image.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
         
         # Convert image to a byte stream
         with io.BytesIO() as img_byte_arr:
@@ -997,7 +1008,7 @@ class ChatCommands(commands.Cog):
                     # Add response to chat history
                     chat_history.append(
                         {
-                            "role": "system",
+                            "role": "assistant",
                             "content": assistant_reply,
                         }
                     )
