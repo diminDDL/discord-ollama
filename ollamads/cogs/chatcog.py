@@ -5,6 +5,7 @@ from re import T
 import discord
 import asyncio
 import json
+import re
 import io
 import base64
 import aiohttp
@@ -795,6 +796,20 @@ class ChatCommands(commands.Cog):
             for attachment in message.attachments:
                 image_url_list.append(attachment.url)
 
+        # attach any image url to the message
+        if message.embeds:
+            for embed in message.embeds:
+                if embed.image:
+                    image_url_list.append(embed.image.url)
+                if embed.thumbnail:
+                    image_url_list.append(embed.thumbnail.url)
+
+        image_url_pattern = r"https:\/\/media\.discordapp\.net\/attachments[^\s]*(?:jpg|jpeg|png|gif|webp)"
+
+        match = re.search(image_url_pattern, message.content)
+        if match:
+            image_url_list.append(match.group(0))
+
         if image_url_list:
             image_url = image_url_list[0]
 
@@ -803,6 +818,10 @@ class ChatCommands(commands.Cog):
                 return
 
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
+            match = re.search(image_url_pattern, referenced_message.content)
+            if match:
+                image_url_list.append(match.group(0))
+
             # Suggested by https://github.com/R2Boyo25
             message_content = "\"" + referenced_message.content + "\"\n" + message_content
             # message_content = "> " + referenced_message.content.strip().replace("\n", "\n> ")
@@ -810,7 +829,7 @@ class ChatCommands(commands.Cog):
             if referenced_message.attachments:
                 for attachment in referenced_message.attachments:
                     image_url_list.append(attachment.url)
-                    
+
             if referenced_message.embeds:
                 for embed in referenced_message.embeds:
                     if embed.image:
