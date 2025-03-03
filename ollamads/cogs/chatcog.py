@@ -90,7 +90,8 @@ class ChatCommands(commands.Cog):
         self.pp = ProcessPoolExecutor(max_workers=1)    
         self.sep = asyncio.Semaphore(2)
         self.ll = asyncio.get_event_loop()     
-        self.max_history = 20   
+        self.max_history = 20
+        self.models = None
         
         bot.loop.create_task(self.__load_models_async__())
 
