@@ -765,6 +765,53 @@ class ChatCommands(commands.Cog):
                 return True
             
         return False
+    
+
+    async def __get_any_image__(self, ctx, message):
+        image_url_list = []
+        image_url = ""
+        image_url_pattern = r"https:\/\/media\.discordapp\.net\/attachments[^\s]*(?:jpg|jpeg|png|gif|webp)"
+
+        if message.attachments:
+            for attachment in message.attachments:
+                image_url_list.append(attachment.url)
+
+        if message.embeds:
+            for embed in message.embeds:
+                if embed.image:
+                    image_url_list.append(embed.image.url)
+                elif embed.thumbnail:
+                    image_url_list.append(embed.thumbnail.url)
+
+        match = re.search(image_url_pattern, message.content)
+        if match:
+            image_url_list.append(match.group(0))
+            
+        if message.reference and message.reference.message_id: 
+            reference_message = await ctx.channel.fetch_message(message.reference.message_id)
+
+            referenced_message = await message.channel.fetch_message(message.reference.message_id)
+            match = re.search(image_url_pattern, referenced_message.content)
+            if match:
+                image_url_list.append(match.group(0))
+
+            if reference_message.attachments:
+                image_url = reference_message.attachments[0].url
+
+            if referenced_message.embeds:
+                for embed in referenced_message.embeds:
+                    if embed.image:
+                        image_url_list.append(embed.image.url)
+                    if embed.thumbnail:
+                        image_url_list.append(embed.thumbnail.url)
+
+        if len(image_url_list) > 0:
+            image_url = image_url_list[0]
+
+        if not image_url:
+            return None
+        else:
+            return image_url
 
 
     @commands.Cog.listener()
@@ -776,6 +823,8 @@ class ChatCommands(commands.Cog):
 
         if not message.guild:
             return
+        if message.content == "" and not message.attachments:
+            return
         
         redis_key = f"guild:{ctx.guild.id}:channel:{ctx.channel.id}:settings"
         allow_bots = await self.redis.hget(redis_key, "bot2bot")
@@ -784,62 +833,19 @@ class ChatCommands(commands.Cog):
             return
         elif message.author == self.bot.user:
             return
-        
-        if message.content == "":
+        if await self.__check_ban_or_whitelist__(ctx, message.author):
             return
         
         message_content = message.content
-
-        image_url_list = []
-        image_url = None
-        
-        if message.attachments:
-            for attachment in message.attachments:
-                image_url_list.append(attachment.url)
-
-        # attach any image url to the message
-        if message.embeds:
-            for embed in message.embeds:
-                if embed.image:
-                    image_url_list.append(embed.image.url)
-                if embed.thumbnail:
-                    image_url_list.append(embed.thumbnail.url)
-
-        image_url_pattern = r"https:\/\/media\.discordapp\.net\/attachments[^\s]*(?:jpg|jpeg|png|gif|webp)"
-
-        match = re.search(image_url_pattern, message.content)
-        if match:
-            image_url_list.append(match.group(0))
-
-        if image_url_list:
-            image_url = image_url_list[0]
+        print(message.attachments)
+        image_url = await self.__get_any_image__(ctx, message)
 
         if message.reference and message.reference.message_id: 
-            if await self.__check_ban_or_whitelist__(ctx, message.author):
-                return
-
             referenced_message = await message.channel.fetch_message(message.reference.message_id)
-            match = re.search(image_url_pattern, referenced_message.content)
-            if match:
-                image_url_list.append(match.group(0))
 
             # Suggested by https://github.com/R2Boyo25
             message_content = "\"" + referenced_message.content + "\"\n" + message_content
             # message_content = "> " + referenced_message.content.strip().replace("\n", "\n> ")
-
-            if referenced_message.attachments:
-                for attachment in referenced_message.attachments:
-                    image_url_list.append(attachment.url)
-
-            if referenced_message.embeds:
-                for embed in referenced_message.embeds:
-                    if embed.image:
-                        image_url_list.append(embed.image.url)
-                    if embed.thumbnail:
-                        image_url_list.append(embed.thumbnail.url)
-
-            if image_url_list:
-                image_url = image_url_list[0]
 
             if (referenced_message.author == self.bot.user) or (self.bot.user in message.mentions):
                 await self.__llm_chat__(ctx, message_content, image_url)
@@ -881,7 +887,7 @@ class ChatCommands(commands.Cog):
                 image.seek(frame_index)
             image = image.convert("RGBA")
         
-        image.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+        image.thumbnail((672, 672), Image.Resampling.LANCZOS)
         
         # Convert image to a byte stream
         with io.BytesIO() as img_byte_arr:
