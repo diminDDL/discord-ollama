@@ -1,22 +1,54 @@
-# Based on https://github.com/ThatRedKite/thatkitebot/
+# ------------------------------------------------------
+# HOW TO USE:
+# 1. For Local Mode (connect to ollama on localhost): 
+#   Keep the LOCAL MODE sections uncommented and comment out the TAILSCALE MODE sections
+# 2. For Tailscale Mode (connect to ollama through tailscale): 
+#   Comment out all LOCAL MODE sections and uncomment all TAILSCALE MODE sections
+# ------------------------------------------------------
+
 services:
   ollamads:
-    build:  .
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    build: .
     volumes:
       - ./ollamads/:/app/ollamads
       - ./data/:/app/data/
-    restart:  "unless-stopped"
-    environment:
-      - PYTHONUNBUFFERED=1
+    restart: "unless-stopped"
     command: bash -c "cd /app/ && python3 -m ollamads"
 
+    # === LOCAL MODE CONFIGURATION ===
+    # Uncomment these lines for local mode (via host.docker.internal)
+    # environment:
+    #   - PYTHONUNBUFFERED=1
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    # End of LOCAL MODE
+
+    # === TAILSCALE MODE CONFIGURATION ===
+    # Uncomment these lines for Tailscale mode (via host network)
+    network_mode: "host"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6380
+    depends_on:
+      - valkey
+    # End of TAILSCALE MODE
 
   valkey:
     container_name: ollamads_redis
     volumes:
       - ./data/redis:/data
     image: "valkey/valkey:latest"
-    entrypoint: valkey-server --appendonly yes
-    restart:  "unless-stopped"
+    restart: "unless-stopped"
+
+    # === LOCAL MODE CONFIGURATION ===
+    # Uncomment this line for local mode
+    # entrypoint: valkey-server --appendonly yes
+    # End of LOCAL MODE
+
+    # === TAILSCALE MODE CONFIGURATION ===
+    # Uncomment these lines for Tailscale mode
+    entrypoint: valkey-server --appendonly yes --bind 0.0.0.0 --protected-mode no
+    ports:
+      - "6380:6379"
+    # End of TAILSCALE MODE

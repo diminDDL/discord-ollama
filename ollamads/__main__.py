@@ -96,8 +96,13 @@ class ollamads(bridge.Bot):
         self.loop.run_until_complete(self.aiohttp_start())
 
         print("Connecting to redis...")
+        # Check if REDIS_PORT environment variable is set, if not set it to 6379
+        redis_port = os.getenv("REDIS_PORT", 6379)
+        # Check if REDIS_HOST environment variable is set, if not set it to localhost
+        redis_host = os.getenv("REDIS_HOST", "ollamads_redis")
         try:
-            self.redis = redis.Redis(host="ollamads_redis", db=1, decode_responses=True)
+            print(f"Connecting to redis at {redis_host}:{redis_port}...")
+            self.redis = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
             print("Connection successful.")
         except redis.ConnectionError:
             print("Redis connection failed. Check if redis is running.")
